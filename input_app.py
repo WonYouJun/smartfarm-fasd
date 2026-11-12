@@ -307,7 +307,12 @@ with tab4:
     # 🔍 공백을 완전히 제거한 컬럼 리스트와 비교하도록 방어 코드 강화
     cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
 
-   if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
+    ref_col = f"st_{selected_col_key}".strip()
+
+    # 🔍 공백을 완전히 제거한 컬럼 리스트와 비교하도록 방어 코드 강화
+    cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
+
+    if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
         # 혹시 모를 컬럼명 공백을 맞추기 위해 컬럼명 일괄 정제
         df_bench.columns = cleaned_bench_columns
         filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
