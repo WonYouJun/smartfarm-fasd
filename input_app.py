@@ -227,6 +227,24 @@ with tab3:
 
 with tab4:
     st.subheader("📈 구역별 변수 시계열 및 9S-9P 기준선 비교 (Tab 4)")
+
+    # ... (기존 selectbox 및 데이터 조회 코드) ...
+    
+    # 예시: 사용자가 선택한 변수에 대응하는 기준선 컬럼명 매칭
+    # 예컨대 'swing_index'를 선택했다면 벤치마크 CSV의 'st_swing_index'를 찾도록 연결
+    selected_var = ... # 사용자가 선택한 변수 컬럼 (예: 'swing_index')
+    benchmark_col = f"st_{selected_var}" if not selected_var.startswith("st_") else selected_var
+    
+    # 공백 제거된 컬럼 목록에서 안전하게 확인
+    cleaned_columns = [c.strip() for c in df_bench.columns]
+    
+    if benchmark_col in cleaned_columns:
+        # 정상적으로 기준선 데이터를 찾아 Plotly 그래프에 빨간색 선으로 추가
+        benchmark_values = df_bench[benchmark_col]
+        # fig.add_trace(go.Scatter(..., line=dict(color='red'))) 처럼 빨간색 선 추가 로직 수행
+    else:
+        st.info(f"안내: 선택하신 변수에 대응하는 9S-9P 기준선 컬럼({benchmark_col})이 cold_start_standards.csv에 없습니다.")
+    
     st.markdown("실제 수집/연산된 센서 데이터(파란색 점/실선)와 9S-9P 기준선(빨간색 점/실선)을 나란히 시각화합니다.")
 
     if not os.path.exists(DB_NAME):
@@ -284,10 +302,15 @@ with tab4:
                 var_label = col_options.get(selected_col_key, selected_col_key)
                 st.markdown(f"### 📉 **[{var_label}] 실제값(파란색) vs 9S-9P 기준선(빨간색) 비교**")
 
-                ref_col = f"st_{selected_col_key}"
+    ref_col = f"st_{selected_col_key}".strip()
+    
+    # 🔍 공백을 완전히 제거한 컬럼 리스트와 비교하도록 방어 코드 강화
+    cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
 
-                if ref_col in df_bench.columns and not df_bench.empty and PLOTLY_AVAILABLE:
-                    filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
+    if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
+        # 혹시 모를 컬럼명 공백을 맞추기 위해 컬럼명 일괄 정제
+        df_bench.columns = cleaned_bench_columns
+        filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
                     
                     merged_plot_df = pd.merge(
                         filtered_actual[["week_no", "zone_id", selected_col_key]],
