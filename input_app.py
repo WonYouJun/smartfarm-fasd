@@ -10,28 +10,10 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
+DB_NAME = "smartfarm_yield_swing.db"
+# 현재 app.py가 있는 폴더 경로를 기준으로 절대 경로 지정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-possible_paths = [
-    os.path.join(BASE_DIR, "cold_start_standards.csv"),
-    "/mount/src/smartfarm-fasd/cold_start_standards.csv",
-    "cold_start_standards.csv",
-    "./cold_start_standards.csv"
-]
-
-BENCHMARK_CSV = None
-for path in possible_paths:
-    if os.path.exists(path):
-        BENCHMARK_CSV = path
-        break
-
-if BENCHMARK_CSV:
-    df_bench = pd.read_csv(BENCHMARK_CSV)
-    df_bench.columns = df_bench.columns.str.strip()
-    st.sidebar.success(f"✅ CSV 로드 성공: {len(df_bench)}행")
-else:
-    df_bench = pd.DataFrame()
-
-DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
+BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
 
 def init_db():
     if not os.path.exists(DB_NAME):
@@ -142,17 +124,16 @@ with tab1:
             conn.close()
 
             new_data = {
-                "zone_id": zone_id, "week_no": week_no, "dli_daily": dli_daily, 
-                "t_mean": t_mean, "t_day": t_day, "t_night": t_night, 
-                "vpd_mean": vpd_mean, "vpd_max": vpd_max, "rtr": (dli_daily * 10) / max(t_mean, 1), 
-                "rh_mean": rh_mean, "dew_point": t_mean - ((100 - rh_mean) / 5), 
-                "fruit_load": fruit_load, "t_leaf": t_leaf, "cwsi": cwsi, 
-                "stem_diameter": stem_diameter, "stem_shrinkage": stem_shrinkage, 
-                "vwc": vwc, "drainage_rate": drainage_rate, "y_actual": y_actual, 
-                "y_target": y_target, "cum_p_n_8w": 0, "tr_ratio": 0, "gdd_8w": 0, 
-                "lagged_dli_7w": 0, "lagged_temp_7w": 0, "w_avg": 0, 
-                "yield_swing_delta": 0, "ma_3week": 0, "swing_index": 0, 
-                "grade_distribution": 0, "brix_variance": 0, "fli": 0
+                "zone_id": zone_id, "week_no": week_no, "dli_daily": dli_daily,
+                "t_mean": t_mean, "t_day": t_day, "t_night": t_night,
+                "vpd_mean": vpd_mean, "vpd_max": vpd_max, "rtr": (dli_daily * 10) / max(t_mean, 1),
+                "rh_mean": rh_mean, "dew_point": t_mean - ((100 - rh_mean) / 5),
+                "fruit_load": fruit_load, "t_leaf": t_leaf, "cwsi": cwsi,
+                "stem_diameter": stem_diameter, "stem_shrinkage": stem_shrinkage,
+                "vwc": vwc, "drainage_rate": drainage_rate, "y_actual": y_actual, "y_target": y_target,
+                "cum_p_n_8w": 0, "tr_ratio": 0, "gdd_8w": 0, "lagged_dli_7w": 0,
+                "lagged_temp_7w": 0, "w_avg": 0, "yield_swing_delta": 0,
+                "ma_3week": 0, "swing_index": 0, "grade_distribution": 0, "brix_variance": 0, "fli": 0
             }
             df_new_row = pd.DataFrame([new_data])
             df_combined = pd.concat([df_existing[df_existing["week_no"] != week_no], df_new_row], ignore_index=True)
@@ -235,7 +216,6 @@ with tab4:
             df_bench = pd.DataFrame()
             if os.path.exists(BENCHMARK_CSV):
                 df_bench = pd.read_csv(BENCHMARK_CSV)
-                df_bench.columns = df_bench.columns.str.strip()
 
             c1, c2 = st.columns(2)
             with c1:
@@ -276,32 +256,30 @@ with tab4:
                 var_label = col_options.get(selected_col_key, selected_col_key)
                 st.markdown(f"### 📉 **[{var_label}] 실제값(파란색) vs 9S-9P 기준선(빨간색) 비교**")
 
-                ref_col = f"st_{selected_col_key}".strip()
-                cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
+                ref_col = f"st_{selected_col_key}"
 
-                if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
-                    df_bench.columns = cleaned_bench_columns
+                if ref_col in df_bench.columns and not df_bench.empty and PLOTLY_AVAILABLE:
                     filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
-
+                    
                     merged_plot_df = pd.merge(
                         filtered_actual[["week_no", "zone_id", selected_col_key]],
                         filtered_bench[["week_no", "zone_id", ref_col]],
                         on=["week_no", "zone_id"],
                         how="left"
                     )
-
+                    
                     long_data = []
                     color_map = {}
-
+                    
                     for idx, row in merged_plot_df.iterrows():
                         w = row["week_no"]
                         z = row["zone_id"]
                         val_actual = row[selected_col_key]
                         val_ref = row[ref_col]
-
+                        
                         act_label = f"{z} (실제)"
                         ref_label = f"{z} (9S-9P 기준)"
-
+                        
                         if pd.notna(val_actual):
                             long_data.append({
                                 "주차 (Week)": w,
@@ -309,7 +287,7 @@ with tab4:
                                 "값": val_actual
                             })
                             color_map[act_label] = "#2980b9"
-
+                            
                         if pd.notna(val_ref):
                             long_data.append({
                                 "주차 (Week)": w,
@@ -317,18 +295,18 @@ with tab4:
                                 "값": val_ref
                             })
                             color_map[ref_label] = "#e74c3c"
-
+                    
                     df_plot = pd.DataFrame(long_data)
-
+                    
                     if not df_plot.empty:
                         fig = px.line(
-                            df_plot,
-                            x="주차 (Week)",
-                            y="값",
+                            df_plot, 
+                            x="주차 (Week)", 
+                            y="값", 
                             color="구분",
                             color_discrete_map=color_map,
                             markers=True
-                        )    
+                        )
                         fig.update_layout(
                             xaxis_title="주차 (Week)",
                             yaxis_title=var_label,
@@ -339,18 +317,18 @@ with tab4:
                         st.plotly_chart(fig, use_container_width=True)
                         st.success("💡 안내: **파란색 선과 점**은 실제 수집/연산 데이터이며, **빨간색 선과 점**은 9S-9P 관리기준표 표준 기준선입니다.")
 
-                        st.markdown("---")
-                        st.markdown("### 📋 상세 비교 데이터 테이블")
-                        
-                        pivot_combined = merged_plot_df.pivot(index="week_no", columns="zone_id")
-                        plot_table_data = pd.DataFrame(index=pivot_combined.index)
-                        for z in selected_zones:
-                            if (selected_col_key, z) in pivot_combined.columns:
-                                plot_table_data[f"{z} (실제)"] = pivot_combined[(selected_col_key, z)]
-                            if (ref_col, z) in pivot_combined.columns:
-                                plot_table_data[f"{z} (9S-9P 기준)"] = pivot_combined[(ref_col, z)]
-                        
-                        st.dataframe(plot_table_data.reset_index().rename(columns={"week_no": "주차 (Week)"}), use_container_width=True, height=350)
+                    st.markdown("---")
+                    st.markdown("### 📋 상세 비교 데이터 테이블")
+                    
+                    pivot_combined = merged_plot_df.pivot(index="week_no", columns="zone_id")
+                    plot_table_data = pd.DataFrame(index=pivot_combined.index)
+                    for z in selected_zones:
+                        if (selected_col_key, z) in pivot_combined.columns:
+                            plot_table_data[f"{z} (실제)"] = pivot_combined[(selected_col_key, z)]
+                        if (ref_col, z) in pivot_combined.columns:
+                            plot_table_data[f"{z} (9S-9P 기준)"] = pivot_combined[(ref_col, z)]
+                    
+                    st.dataframe(plot_table_data.reset_index().rename(columns={"week_no": "주차 (Week)"}), use_container_width=True, height=350)
 
                 else:
                     pivot_actual = filtered_actual.pivot(index="week_no", columns="zone_id", values=selected_col_key)
