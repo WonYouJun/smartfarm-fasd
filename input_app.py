@@ -28,7 +28,10 @@ for path in possible_paths:
 
 if BENCHMARK_CSV:
     df_bench = pd.read_csv(BENCHMARK_CSV)
-    # 정상 로드 확인용 (사이드바에 컬럼 수 표시)
+    
+    # 🔍 핵심 해결: 컬럼명 앞뒤 공백 제거 및 소문자 정렬 등 데이터 정제
+    df_bench.columns = df_bench.columns.str.strip()
+    
     st.sidebar.success(f"✅ CSV 로드 성공: {len(df_bench)}행 ({os.path.basename(BENCHMARK_CSV)})")
 else:
     st.error("🚨 지정된 모든 경로에서 cold_start_standards.csv 파일을 찾지 못했습니다.")
