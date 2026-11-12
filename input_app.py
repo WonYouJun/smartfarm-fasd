@@ -16,7 +16,7 @@ BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
 DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
 
 # 2. 캐시를 타지 않고 직접 파일을 읽어오는 안전 로직
-@st.cache_data(show_spinner=False)
+# @st.cache_data(show_spinner=False)
 def load_benchmark_data(file_path):
     if os.path.exists(file_path):
         return pd.read_csv(file_path)
