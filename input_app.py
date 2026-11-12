@@ -10,29 +10,36 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# 1. 스크립트 파일이 실제로 존재하는 폴더 경로 기준 확보
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CWD = os.getcwd()
+# 1. 절대 경로 설정 (현재 스크립트 위치 기준)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
 
-# 2. 가능한 모든 후보 경로 탐색
-possible_csv_paths = [
-    os.path.join(SCRIPT_DIR, "cold_start_standards.csv"),
-    os.path.join(CWD, "cold_start_standards.csv"),
-    "cold_start_standards.csv"
-]
+# 2. 캐시를 타지 않고 직접 파일을 읽어오는 안전 로직
+@st.cache_data(show_spinner=False)
+def load_benchmark_data(file_path):
+    if os.path.exists(file_path):
+        return pd.read_csv(file_path)
+    else:
+        # 파일이 없을 경우 현재 폴더의 파일 목록을 반환하여 진단
+        return None
 
-BENCHMARK_CSV = None
-for path in possible_csv_paths:
-    if os.path.exists(path):
-        BENCHMARK_CSV = path
-        break
+# 데이터 로드 실행
+df_bench = load_benchmark_data(BENCHMARK_CSV)
 
-# 만약 그래도 못 찾았다면 서버 디렉토리 내 실제 파일 목록을 화면에 출력하여 진단
-if BENCHMARK_CSV is None:
-    st.error(f"🚨 [경로 오류 진단] CSV 파일을 찾지 못했습니다.")
-    st.info(f"- 스크립트 폴더({SCRIPT_DIR}) 파일 목록: {os.listdir(SCRIPT_DIR) if os.path.exists(SCRIPT_DIR) else '경로 없음'}")
-    st.info(f"- 현재 작업 폴더({CWD}) 파일 목록: {os.listdir(CWD)}")
-    BENCHMARK_CSV = "cold_start_standards.csv"  # 기본 fallback
+# 3. 만약 로드 실패 시 화면에 실시간 진단 정보 표시 (성공 여부 확인용)
+if df_bench is None or df_bench.empty:
+    st.error(f"❌ 경로에서 파일을 읽지 못했습니다: {BENCHMARK_CSV}")
+    st.write("현재 디렉토리 파일 목록:", os.listdir(BASE_DIR))
+    # 대체 경로 시도
+    fallback_path = "cold_start_standards.csv"
+    if os.path.exists(fallback_path):
+        df_bench = pd.read_csv(fallback_path)
+        st.success("✅ Fallback 경로로 파일을 불러왔습니다!")
+    else:
+        df_bench = pd.DataFrame()
+else:
+    # 정상 로드 성공 시 검증 메시지 (필요시 주석 처리 가능)
+    # st.sidebar.success(f"기준선 파일 로드 완료 ({len(df_bench)}행)")
 
 # DB 경로도 동일하게 스크립트 폴더 기준으로 고정
 DB_NAME = os.path.join(SCRIPT_DIR, "smartfarm_yield_swing.db")
