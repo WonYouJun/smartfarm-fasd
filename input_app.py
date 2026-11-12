@@ -115,7 +115,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📝 원천 데이터 직접 입력", 
     "📂 일괄 파일 업로드 및 연산", 
     "📊 DB 데이터 조회", 
-    "📈 구역별 시계열 및 9S-9P 비교 (Tab 4)",
+    "📈 구역별 시계열 및 9S-9P 기준선 비교 (Tab 4)",
     "🔍 2단계 계층적 스윙 진단 (Tab 5)"
 ])
 
@@ -227,24 +227,6 @@ with tab3:
 
 with tab4:
     st.subheader("📈 구역별 변수 시계열 및 9S-9P 기준선 비교 (Tab 4)")
-
-    # ... (기존 selectbox 및 데이터 조회 코드) ...
-    
-    # 예시: 사용자가 선택한 변수에 대응하는 기준선 컬럼명 매칭
-    # 예컨대 'swing_index'를 선택했다면 벤치마크 CSV의 'st_swing_index'를 찾도록 연결
-    selected_var = ... # 사용자가 선택한 변수 컬럼 (예: 'swing_index')
-    benchmark_col = f"st_{selected_var}" if not selected_var.startswith("st_") else selected_var
-    
-    # 공백 제거된 컬럼 목록에서 안전하게 확인
-    cleaned_columns = [c.strip() for c in df_bench.columns]
-    
-    if benchmark_col in cleaned_columns:
-        # 정상적으로 기준선 데이터를 찾아 Plotly 그래프에 빨간색 선으로 추가
-        benchmark_values = df_bench[benchmark_col]
-        # fig.add_trace(go.Scatter(..., line=dict(color='red'))) 처럼 빨간색 선 추가 로직 수행
-    else:
-        st.info(f"안내: 선택하신 변수에 대응하는 9S-9P 기준선 컬럼({benchmark_col})이 cold_start_standards.csv에 없습니다.")
-    
     st.markdown("실제 수집/연산된 센서 데이터(파란색 점/실선)와 9S-9P 기준선(빨간색 점/실선)을 나란히 시각화합니다.")
 
     if not os.path.exists(DB_NAME):
@@ -262,6 +244,7 @@ with tab4:
             df_bench = pd.DataFrame()
             if os.path.exists(BENCHMARK_CSV):
                 df_bench = pd.read_csv(BENCHMARK_CSV)
+                df_bench.columns = df_bench.columns.str.strip()
 
             c1, c2 = st.columns(2)
             with c1:
@@ -302,77 +285,68 @@ with tab4:
                 var_label = col_options.get(selected_col_key, selected_col_key)
                 st.markdown(f"### 📉 **[{var_label}] 실제값(파란색) vs 9S-9P 기준선(빨간색) 비교**")
 
-    ref_col = f"st_{selected_col_key}".strip()
-    
-    # 🔍 공백을 완전히 제거한 컬럼 리스트와 비교하도록 방어 코드 강화
-    cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
+                ref_col = f"st_{selected_col_key}".strip()
+                cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
 
-    ref_col = f"st_{selected_col_key}".strip()
+                if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
+                    df_bench.columns = cleaned_bench_columns
+                    filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
 
-    # 🔍 공백을 완전히 제거한 컬럼 리스트와 비교하도록 방어 코드 강화
-    cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
+                    merged_plot_df = pd.merge(
+                        filtered_actual[["week_no", "zone_id", selected_col_key]],
+                        filtered_bench[["week_no", "zone_id", ref_col]],
+                        on=["week_no", "zone_id"],
+                        how="left"
+                    )
 
-    if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
-        # 혹시 모를 컬럼명 공백을 맞추기 위해 컬럼명 일괄 정제
-        df_bench.columns = cleaned_bench_columns
-        filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
+                    long_data = []
+                    color_map = {}
 
-        merged_plot_df = pd.merge(
-            filtered_actual[["week_no", "zone_id", selected_col_key]],
-            filtered_bench[["week_no", "zone_id", ref_col]],
-            on=["week_no", "zone_id"],
-            how="left"
-        )
+                    for idx, row in merged_plot_df.iterrows():
+                        w = row["week_no"]
+                        z = row["zone_id"]
+                        val_actual = row[selected_col_key]
+                        val_ref = row[ref_col]
 
-        long_data = []
-        color_map = {}
+                        act_label = f"{z} (실제)"
+                        ref_label = f"{z} (9S-9P 기준)"
 
-        for idx, row in merged_plot_df.iterrows():
-            w = row["week_no"]
-            z = row["zone_id"]
-            val_actual = row[selected_col_key]
-            val_ref = row[ref_col]
+                        if pd.notna(val_actual):
+                            long_data.append({
+                                "주차 (Week)": w,
+                                "구분": act_label,
+                                "값": val_actual
+                            })
+                            color_map[act_label] = "#2980b9"
 
-            act_label = f"{z} (실제)"
-            ref_label = f"{z} (9S-9P 기준)"
+                        if pd.notna(val_ref):
+                            long_data.append({
+                                "주차 (Week)": w,
+                                "구분": ref_label,
+                                "값": val_ref
+                            })
+                            color_map[ref_label] = "#e74c3c"
 
-            if pd.notna(val_actual):
-                long_data.append({
-                    "주차 (Week)": w,
-                    "구분": act_label,
-                    "값": val_actual
-                })
-                color_map[act_label] = "#2980b9"
+                    df_plot = pd.DataFrame(long_data)
 
-            if pd.notna(val_ref):
-                long_data.append({
-                    "주차 (Week)": w,
-                    "구분": ref_label,
-                    "값": val_ref
-                })
-                color_map[ref_label] = "#e74c3c"
-
-        df_plot = pd.DataFrame(long_data)
-
-        # 💡 이 부분의 if문과 아래 그래프 그리는 코드를 바깥쪽(왼쪽)으로 4칸 당겨주세요.
-        if not df_plot.empty:
-            fig = px.line(
-                df_plot,
-                x="주차 (Week)",
-                y="값",
-                color="구분",
-                color_discrete_map=color_map,
-                markers=True
-            )    
-            fig.update_layout(
-                xaxis_title="주차 (Week)",
-                yaxis_title=var_label,
-                legend_title="범례",
-                height=450,
-                margin=dict(l=20, r=20, t=30, b=20)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            st.success("💡 안내: **파란색 선과 점**은 실제 수집/연산 데이터이며, **빨간색 선과 점**은 9S-9P 관리기준표 표준 기준선입니다.")
+                    if not df_plot.empty:
+                        fig = px.line(
+                            df_plot,
+                            x="주차 (Week)",
+                            y="값",
+                            color="구분",
+                            color_discrete_map=color_map,
+                            markers=True
+                        )
+                        fig.update_layout(
+                            xaxis_title="주차 (Week)",
+                            yaxis_title=var_label,
+                            legend_title="범례",
+                            height=450,
+                            margin=dict(l=20, r=20, t=30, b=20)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.success("💡 안내: **파란색 선과 점**은 실제 수집/연산 데이터이며, **빨간색 선과 점**은 9S-9P 관리기준표 표준 기준선입니다.")
 
                     st.markdown("---")
                     st.markdown("### 📋 상세 비교 데이터 테이블")
@@ -402,95 +376,4 @@ with tab5:
     st.subheader("🔍 FAS-D 2단계 계층적 스윙 진단 시스템 (Tab 5)")
     st.markdown("실제 데이터가 수집된 주차 범위 내에서 스윙 발생 주차를 탐지하고 1·2단계 피어슨 상관분석을 수행합니다.")
 
-    if not os.path.exists(DB_NAME):
-        st.warning("⚠️ 저장된 DB가 없습니다. 데이터를 먼저 업로드해 주세요.")
-    else:
-        conn = sqlite3.connect(DB_NAME)
-        df_analysis = pd.read_sql("SELECT * FROM yield_swing_data", conn)
-        conn.close()
-
-        if df_analysis.empty:
-            st.warning("⚠️ DB에 저장된 데이터가 없습니다.")
-        else:
-            df_analysis["swing_index"] = df_analysis["swing_index"].fillna(0)
-            swing_alert_df = df_analysis[df_analysis["swing_index"].abs() >= 5.0].sort_values(by="week_no")
-            
-            max_collected_week = int(df_analysis["week_no"].max()) if not df_analysis.empty else 0
-            st.markdown(f"### 🚨 [스윙 모니터링] 수집된 데이터 범위(1 ~ {max_collected_week}주차) 중 주의/위험 스윙 발생 주차 리스트")
-            
-            if len(swing_alert_df) > 0:
-                st.dataframe(swing_alert_df[["zone_id", "week_no", "y_actual", "ma_3week", "swing_index", "cum_p_n_8w", "tr_ratio"]].rename(columns=FACTOR_LABELS), height=200)
-            else:
-                st.info(f"현재 수집된 1 ~ {max_collected_week}주차 데이터 중 임계값(±5%)을 초과하는 스윙 주차가 없습니다.")
-
-            st.markdown("---")
-            st.markdown("### 🎯 재배사 진단 타겟 주차 선택 및 2단계 상관분석")
-            
-            zones = df_analysis["zone_id"].unique().tolist()
-            if len(zones) > 0:
-                col_sel1, col_sel2 = st.columns(2)
-                with col_sel1:
-                    selected_zone = st.selectbox("진단 구역 선택", zones, key="tab5_zone_select")
-                with col_sel2:
-                    available_weeks = sorted(df_analysis[df_analysis["zone_id"] == selected_zone]["week_no"].unique().tolist())
-                    if available_weeks:
-                        default_idx = len(available_weeks) - 1
-                        selected_week = st.selectbox(f"진단 주차 선택 (수집된 주차: 1 ~ {max_collected_week}주차)", available_weeks, index=default_idx, key="tab5_week_select")
-                    else:
-                        selected_week = 1
-                        st.selectbox("진단 주차 선택", [1], key="tab5_week_select_empty")
-
-                target_rows = df_analysis[(df_analysis["zone_id"] == selected_zone) & (df_analysis["week_no"] == selected_week)]
-                
-                if not target_rows.empty:
-                    target_row = target_rows.iloc[0]
-                    st.info(f"📌 [{selected_zone}] {selected_week}주차 현황: 실제 수확량 = {target_row['y_actual']} kg/m², 스윙 지수 = {target_row['swing_index']:.2f}%, T/R율 = {target_row['tr_ratio']:.2f}")
-
-                    if st.button("🔬 2단계 계층적 상관분석(Macro-Micro) 실행", key="tab5_analysis_button"):
-                        zone_df = df_analysis[df_analysis["zone_id"] == selected_zone].sort_values("week_no")
-
-                        st.markdown("---")
-                        st.markdown("#### [1단계] Macro 상관분석 (핵심 생리 인자 vs 스윙 진단)")
-                        macro_vars = ["x1_cum_dli_8w", "gdd_8w", "fli", "cum_p_n_8w", "tr_ratio", "w_avg", "swing_index"]
-                        corr_matrix = zone_df[macro_vars].corr()
-                        macro_corr = corr_matrix[["swing_index"]].drop("swing_index").fillna(0)
-                        macro_corr.columns = ["corr"]
-                        
-                        if not macro_corr.empty:
-                            top_factor = macro_corr["corr"].abs().idxmax()
-                            top_r = macro_corr.loc[top_factor, "corr"]
-                        else:
-                            top_factor = "cum_p_n_8w"
-                            top_r = 0.0
-                        
-                        macro_corr["핵심 인자 설명"] = [FACTOR_LABELS.get(idx, idx) for idx in macro_corr.index]
-                        macro_corr = macro_corr.rename(columns={"corr": "Pearson Correlation (r) with Swing Index"})
-                        macro_corr = macro_corr[["핵심 인자 설명", "Pearson Correlation (r) with Swing Index"]]
-
-                        st.write("📈 **핵심 생리 인자별 피어슨 상관계수 결과 (T/R율 포함):**")
-                        st.dataframe(macro_corr)
-                        
-                        top_factor_name = FACTOR_LABELS.get(top_factor, top_factor)
-                        st.success(f"⚡ **1단계 진단 결과**: 이번 {selected_week}주차 스윙에 가장 큰 영향을 미친 핵심 인자는 '{top_factor_name}'이며, 상관계수 r은 {top_r:.4f}입니다.")
-
-                        st.markdown("---")
-                        st.markdown(f"#### [2단계] Micro 원인 추적 분석 ({selected_week}주차 타겟 인자 vs 원천 센서 데이터)")
-                        micro_vars = ["dli_daily", "t_mean", "vpd_mean", "fruit_load", "vwc", "drainage_rate"]
-                        micro_corr = zone_df[micro_vars + [top_factor]].corr()[[top_factor]].drop(top_factor).fillna(0)
-                        micro_corr.columns = ["corr"]
-
-                        micro_corr["원천 센서 설명"] = [FACTOR_LABELS.get(idx, idx) for idx in micro_corr.index]
-                        micro_corr = micro_corr.rename(columns={"corr": f"Correlation (r) with {top_factor}"})
-                        micro_corr = micro_corr[["원천 센서 설명", f"Correlation (r) with {top_factor}"]]
-
-                        st.write(f"🔍 **핵심 인자({top_factor_name})와 원천 센서 데이터 간의 마이크로 상관관계:**")
-                        st.dataframe(micro_corr)
-
-                        lag_week = max(1, selected_week - 7)
-                        lag_row = zone_df[zone_df["week_no"] == lag_week]
-                        
-                        if len(lag_row) > 0:
-                            l_row = lag_row.iloc[0]
-                            st.warning(f"💡 **엔지니어링 인사이트 (리드타임 분석)**: 작물의 생리적 발달 시차(7주 전)인 {lag_week}주차 원천 데이터를 추적한 결과, 일일 광량(dli_daily)은 {l_row['dli_daily']}, 평균온도(t_mean)는 {l_row['t_mean']}로 나타났습니다. 이 시기의 환경 제어 편차가 현재 {selected_week}주차 스윙의 근본 원인(Root Cause)으로 작용했습니다.")
-                        else:
-                            st.info("7주 전 과거 데이터 구간이 충분하지 않습니다.")
+    if not os.
