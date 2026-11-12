@@ -353,25 +353,26 @@ with tab4:
                 color_map[ref_label] = "#e74c3c"
 
         df_plot = pd.DataFrame(long_data)
-                    
-                    if not df_plot.empty:
-                        fig = px.line(
-                            df_plot, 
-                            x="주차 (Week)", 
-                            y="값", 
-                            color="구분",
-                            color_discrete_map=color_map,
-                            markers=True
-                        )
-                        fig.update_layout(
-                            xaxis_title="주차 (Week)",
-                            yaxis_title=var_label,
-                            legend_title="범례",
-                            height=450,
-                            margin=dict(l=20, r=20, t=30, b=20)
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.success("💡 안내: **파란색 선과 점**은 실제 수집/연산 데이터이며, **빨간색 선과 점**은 9S-9P 관리기준표 표준 기준선입니다.")
+
+        # 💡 이 부분의 if문과 아래 그래프 그리는 코드를 바깥쪽(왼쪽)으로 4칸 당겨주세요.
+        if not df_plot.empty:
+            fig = px.line(
+                df_plot,
+                x="주차 (Week)",
+                y="값",
+                color="구분",
+                color_discrete_map=color_map,
+                markers=True
+            )    
+            fig.update_layout(
+                xaxis_title="주차 (Week)",
+                yaxis_title=var_label,
+                legend_title="범례",
+                height=450,
+                margin=dict(l=20, r=20, t=30, b=20)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.success("💡 안내: **파란색 선과 점**은 실제 수집/연산 데이터이며, **빨간색 선과 점**은 9S-9P 관리기준표 표준 기준선입니다.")
 
                     st.markdown("---")
                     st.markdown("### 📋 상세 비교 데이터 테이블")
