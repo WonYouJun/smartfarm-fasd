@@ -307,7 +307,7 @@ with tab4:
     # 🔍 공백을 완전히 제거한 컬럼 리스트와 비교하도록 방어 코드 강화
     cleaned_bench_columns = [str(c).strip() for c in df_bench.columns]
 
-    if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
+   if ref_col in cleaned_bench_columns and not df_bench.empty and PLOTLY_AVAILABLE:
         # 혹시 모를 컬럼명 공백을 맞추기 위해 컬럼명 일괄 정제
         df_bench.columns = cleaned_bench_columns
         filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
@@ -318,36 +318,36 @@ with tab4:
             on=["week_no", "zone_id"],
             how="left"
         )
-                    
-                    long_data = []
-                    color_map = {}
-                    
-                    for idx, row in merged_plot_df.iterrows():
-                        w = row["week_no"]
-                        z = row["zone_id"]
-                        val_actual = row[selected_col_key]
-                        val_ref = row[ref_col]
-                        
-                        act_label = f"{z} (실제)"
-                        ref_label = f"{z} (9S-9P 기준)"
-                        
-                        if pd.notna(val_actual):
-                            long_data.append({
-                                "주차 (Week)": w,
-                                "구분": act_label,
-                                "값": val_actual
-                            })
-                            color_map[act_label] = "#2980b9"
-                            
-                        if pd.notna(val_ref):
-                            long_data.append({
-                                "주차 (Week)": w,
-                                "구분": ref_label,
-                                "값": val_ref
-                            })
-                            color_map[ref_label] = "#e74c3c"
-                    
-                    df_plot = pd.DataFrame(long_data)
+
+        long_data = []
+        color_map = {}
+
+        for idx, row in merged_plot_df.iterrows():
+            w = row["week_no"]
+            z = row["zone_id"]
+            val_actual = row[selected_col_key]
+            val_ref = row[ref_col]
+
+            act_label = f"{z} (실제)"
+            ref_label = f"{z} (9S-9P 기준)"
+
+            if pd.notna(val_actual):
+                long_data.append({
+                    "주차 (Week)": w,
+                    "구분": act_label,
+                    "값": val_actual
+                })
+                color_map[act_label] = "#2980b9"
+
+            if pd.notna(val_ref):
+                long_data.append({
+                    "주차 (Week)": w,
+                    "구분": ref_label,
+                    "값": val_ref
+                })
+                color_map[ref_label] = "#e74c3c"
+
+        df_plot = pd.DataFrame(long_data)
                     
                     if not df_plot.empty:
                         fig = px.line(
