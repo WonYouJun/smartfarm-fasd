@@ -28,11 +28,12 @@ for path in possible_paths:
 
 if BENCHMARK_CSV:
     df_bench = pd.read_csv(BENCHMARK_CSV)
-    
-    # 🔍 핵심 해결: 컬럼명 앞뒤 공백 제거 및 소문자 정렬 등 데이터 정제
     df_bench.columns = df_bench.columns.str.strip()
     
-    st.sidebar.success(f"✅ CSV 로드 성공: {len(df_bench)}행 ({os.path.basename(BENCHMARK_CSV)})")
+    # 🔍 진단용: 현재 불러온 CSV의 모든 컬럼명을 화면에 출력
+    st.sidebar.write("📋 CSV 컬럼 목록:", list(df_bench.columns))
+    
+    st.sidebar.success(f"✅ CSV 로드 성공: {len(df_bench)}행")
 else:
     st.error("🚨 지정된 모든 경로에서 cold_start_standards.csv 파일을 찾지 못했습니다.")
     st.write("현재 탐색한 경로들:", possible_paths)
