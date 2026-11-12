@@ -144,6 +144,77 @@ with tab1:
             df_existing = pd.read_sql("SELECT * FROM yield_swing_data", conn)
             conn.close()
 
-            new_data = {"zone_id": zone_id, "week_no": week_no, "dli_daily": dli_daily, "t_mean": t_mean, "t_day": t_day, "t_night": t_night, "vpd_mean": vpd_mean, "vpd_max": vpd_max, "rtr": (dli_daily * 10) / max(t_mean, 1), "rh_mean": rh_mean, "dew_point": t_mean - ((100 - rh_mean) / 5), "fruit_load": fruit_load, "t_leaf": t_leaf, "cwsi": cwsi, "stem_diameter": stem_diameter, "stem_shrinkage": stem_shrinkage, "vwc": vwc, "drainage_rate": drainage_rate, "y_actual": y_actual, "y_target": y_target, "cum_p_n_8w": 0, "tr_ratio": 0, "gdd_8w": 0, "lagged_dli_7w": 0, "lagged_temp_7w": 0, "w_avg": 0, "yield_swing_delta": 0, "ma_3week": 0, "swing_index": 0, "grade_distribution": 0, "brix_variance": 0, "fli": 0}
+            new_data = {
+                "zone_id": zone_id, 
+                "week_no": week_no, 
+                "dli_daily": dli_daily, 
+                "t_mean": t_mean, 
+                "t_day": t_day, 
+                "t_night": t_night, 
+                "vpd_mean": vpd_mean, 
+                "vpd_max": vpd_max, 
+                "rtr": (dli_daily * 10) / max(t_mean, 1), 
+                "rh_mean": rh_mean, 
+                "dew_point": t_mean - ((100 - rh_mean) / 5), 
+                "fruit_load": fruit_load, 
+                "t_leaf": t_leaf, 
+                "cwsi": cwsi, 
+                "stem_diameter": stem_diameter, 
+                "stem_shrinkage": stem_shrinkage, 
+                "vwc": vwc, 
+                "drainage_rate": drainage_rate, 
+                "y_actual": y_actual, 
+                "y_target": y_target, 
+                "cum_p_n_8w": 0, 
+                "tr_ratio": 0, 
+                "gdd_8w": 0, 
+                "lagged_dli_7w": 0, 
+                "lagged_temp_7w": 0, 
+                "w_avg": 0, 
+                "yield_swing_delta": 0, 
+                "ma_3week": 0, 
+                "swing_index": 0, 
+                "grade_distribution": 0, 
+                "brix_variance": 0, 
+                "fli": 0
+            }
             df_new_row = pd.DataFrame([new_data])
-            df_combined = pd.concat([df_
+            df_combined = pd.concat(
+                [
+                    df_existing[df_existing["week_no"] != week_no], 
+                    df_new_row
+                ], 
+                ignore_index=True
+            )
+            df_processed = calculate_derived_variables(df_combined)
+
+            conn = sqlite3.connect(DB_NAME)
+            df_processed.to_sql("yield_swing_data", conn, index=False, if_exists="replace")
+            conn.close()
+            st.success(f"[{zone_id}] {week_no}주차 원천 데이터가 성공적으로 연산되어 DB에 저장되었습니다!")
+
+with tab2:
+    st.subheader("CSV 또는 Excel 파일 일괄 업로드 및 4.8.1절 자동 연산")
+    st.markdown("스마트팜 센서 및 생육 측정 원천 데이터가 담긴 CSV 또는 Excel 파일을 업로드하면, **4.8.1절 공식**에 따른 파생 변수와 스윙 지수가 자동으로 연산되어 통합 DB에 반영됩니다.")
+    
+    uploaded_file = st.file_uploader("원천 데이터 파일 업로드 (CSV 또는 Excel)", type=["csv", "xlsx"], key="tab2_file_uploader")
+
+    if uploaded_file is not None:
+        try:
+            uploaded_file.seek(0)
+            if uploaded_file.name.endswith(".csv"):
+                df_upload = pd.read_csv(uploaded_file)
+            else:
+                df_upload = pd.read_excel(uploaded_file)
+
+            st.write(f"📁 **업로드된 원천 데이터 미리보기** (총 {len(df_upload)}행):")
+            st.dataframe(df_upload, height=300)
+
+            if st.button("🚀 4.8.1절 공식 적용 및 자동 연산 실행", key="tab2_calc_button"):
+                df_processed = calculate_derived_variables(df_upload)
+                conn = sqlite3.connect(DB_NAME)
+                df_processed.to_sql("yield_swing_data", conn, index=False, if_exists="replace")
+                conn.close()
+                st.success(f"🎉 총 {len(df_processed)}주차 데이터 자동 연산 및 DB 저장 완료!")
+                
+                st
