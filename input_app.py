@@ -390,7 +390,7 @@ with tab5:
             swing_alert_df = df_analysis[df_analysis["swing_index"].abs() >= 5.0].sort_values(by="week_no")
             
             max_collected_week = int(df_analysis["week_no"].max()) if not df_analysis.empty else 0
-            st.markdown(f"### 🚨 [스윙 모니터링] 수집된 데이터 범위(1 ~ {max_collected_week}주차) 중 주의/위험 스윙 발생 주차 리스트")
+            st.markdown(f"### 🚨 [스윙 모니터링] 수집된 데이터 범위(1 ~ {max_collected_week}주차 중 주의/위험 스윙 발생 주차 리스트")
             
             if len(swing_alert_df) > 0:
                 st.dataframe(swing_alert_df[["zone_id", "week_no", "y_actual", "ma_3week", "swing_index", "cum_p_n_8w", "tr_ratio"]].rename(columns=FACTOR_LABELS), height=200)
@@ -418,7 +418,8 @@ with tab5:
                 
                 if not target_rows.empty:
                     target_row = target_rows.iloc[0]
-                    st.info(f"📌 [{selected_zone}] {selected_week}주차 현황: 실제 수확량 = {target_row['y_actual']} kg/m², 스윙 지수 = {target_row['swing_index']:.2f}%, T/R율 = {target_row['tr_ratio']:.2f}")
+                    current_dli = target_row['dli_daily']
+                    st.info(f"📌 [{selected_zone}] {selected_week}주차 현황: 실제 수확량 = {target_row['y_actual']} kg/m², 스윙 지수 = {target_row['swing_index']:.2f}%, 당해주차 일일광량 = {current_dli:.2f} mol/m²·day")
 
                     if st.button("🔬 2단계 계층적 상관분석(Macro-Micro) 실행", key="tab5_analysis_button"):
                         zone_df = df_analysis[df_analysis["zone_id"] == selected_zone].sort_values("week_no")
@@ -465,6 +466,6 @@ with tab5:
                         
                         if len(lag_row) > 0:
                             l_row = lag_row.iloc[0]
-                            st.warning(f"💡 **엔지니어링 인사이트 (리드타임 분석)**: 작물의 생리적 발달 시차(7주 전)인 {lag_week}주차 원천 데이터를 추적한 결과, 일일 광량(dli_daily)은 {l_row['dli_daily']}, 평균온도(t_mean)는 {l_row['t_mean']}로 나타났습니다. 이 시기의 환경 제어 편차가 현재 {selected_week}주차 스윙의 근본 원인(Root Cause)으로 작용했습니다.")
+                            st.warning(f"💡 **엔지니어링 인사이트 (리드타임 분석)**: 현재 {selected_week}주차 당해 센서 기록(일일 광량 {current_dli:.2f})과 별개로, 작물의 생리적 발달 시차인 7주 전({lag_week}주차) 원천 데이터를 추적한 결과: **13주차 일일 광량(dli_daily)은 {l_row['dli_daily']}, 평균온도(t_mean)는 {l_row['t_mean']}**로 나타났습니다. 이 7주 전(13주차)의 환경 제어 편차가 현재 {selected_week}주차 수확량 스윙의 근본 원인(Root Cause)으로 작용했습니다.")
                         else:
                             st.info("7주 전 과거 데이터 구간이 충분하지 않습니다.")
