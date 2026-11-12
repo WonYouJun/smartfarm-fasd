@@ -10,7 +10,7 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# 기존 BASE_DIR 대신 아래와 같이 현재 작업 디렉토리 기준 경로 설정
+# 현재 실행 중인 작업 디렉토리를 기준으로 절대 경로 설정 (하나만 선택해서 반영)
 BASE_DIR = os.getcwd()
 BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
 DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
