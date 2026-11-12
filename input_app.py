@@ -144,6 +144,6 @@ with tab1:
             df_existing = pd.read_sql("SELECT * FROM yield_swing_data", conn)
             conn.close()
 
-            new_data = {
-                "zone_id": zone_id, "week_no": week_no, "dli_daily": dli_daily,
-                "t_mean": t_mean, "t_day": t_day, "t_night": t_night,
+            new_data = {"zone_id": zone_id, "week_no": week_no, "dli_daily": dli_daily, "t_mean": t_mean, "t_day": t_day, "t_night": t_night, "vpd_mean": vpd_mean, "vpd_max": vpd_max, "rtr": (dli_daily * 10) / max(t_mean, 1), "rh_mean": rh_mean, "dew_point": t_mean - ((100 - rh_mean) / 5), "fruit_load": fruit_load, "t_leaf": t_leaf, "cwsi": cwsi, "stem_diameter": stem_diameter, "stem_shrinkage": stem_shrinkage, "vwc": vwc, "drainage_rate": drainage_rate, "y_actual": y_actual, "y_target": y_target, "cum_p_n_8w": 0, "tr_ratio": 0, "gdd_8w": 0, "lagged_dli_7w": 0, "lagged_temp_7w": 0, "w_avg": 0, "yield_swing_delta": 0, "ma_3week": 0, "swing_index": 0, "grade_distribution": 0, "brix_variance": 0, "fli": 0}
+            df_new_row = pd.DataFrame([new_data])
+            df_combined = pd.concat([df_
