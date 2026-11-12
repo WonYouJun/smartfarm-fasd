@@ -148,4 +148,110 @@ with tab1:
                 "zone_id": zone_id, "week_no": week_no, "dli_daily": dli_daily, 
                 "t_mean": t_mean, "t_day": t_day, "t_night": t_night, 
                 "vpd_mean": vpd_mean, "vpd_max": vpd_max, "rtr": (dli_daily * 10) / max(t_mean, 1), 
-                "rh_mean":
+                "rh_mean": rh_mean, "dew_point": t_mean - ((100 - rh_mean) / 5), 
+                "fruit_load": fruit_load, "t_leaf": t_leaf, "cwsi": cwsi, 
+                "stem_diameter": stem_diameter, "stem_shrinkage": stem_shrinkage, 
+                "vwc": vwc, "drainage_rate": drainage_rate, "y_actual": y_actual, 
+                "y_target": y_target, "cum_p_n_8w": 0, "tr_ratio": 0, "gdd_8w": 0, 
+                "lagged_dli_7w": 0, "lagged_temp_7w": 0, "w_avg": 0, 
+                "yield_swing_delta": 0, "ma_3week": 0, "swing_index": 0, 
+                "grade_distribution": 0, "brix_variance": 0, "fli": 0
+            }
+            df_new_row = pd.DataFrame([new_data])
+            df_combined = pd.concat([df_existing[df_existing["week_no"] != week_no], df_new_row], ignore_index=True)
+            df_processed = calculate_derived_variables(df_combined)
+
+            conn = sqlite3.connect(DB_NAME)
+            df_processed.to_sql("yield_swing_data", conn, index=False, if_exists="replace")
+            conn.close()
+            st.success(f"[{zone_id}] {week_no}주차 원천 데이터가 성공적으로 연산되어 DB에 저장되었습니다!")
+
+with tab2:
+    st.subheader("CSV 또는 Excel 파일 일괄 업로드 및 4.8.1절 자동 연산")
+    st.markdown("스마트팜 센서 및 생육 측정 원천 데이터가 담긴 CSV 또는 Excel 파일을 업로드하면, **4.8.1절 공식**에 따른 파생 변수와 스윙 지수가 자동으로 연산되어 통합 DB에 반영됩니다.")
+    
+    uploaded_file = st.file_uploader("원천 데이터 파일 업로드 (CSV 또는 Excel)", type=["csv", "xlsx"], key="tab2_file_uploader")
+
+    if uploaded_file is not None:
+        try:
+            uploaded_file.seek(0)
+            if uploaded_file.name.endswith(".csv"):
+                df_upload = pd.read_csv(uploaded_file)
+            else:
+                df_upload = pd.read_excel(uploaded_file)
+
+            st.write(f"📁 **업로드된 원천 데이터 미리보기** (총 {len(df_upload)}행):")
+            st.dataframe(df_upload, height=300)
+
+            if st.button("🚀 4.8.1절 공식 적용 및 자동 연산 실행", key="tab2_calc_button"):
+                df_processed = calculate_derived_variables(df_upload)
+                conn = sqlite3.connect(DB_NAME)
+                df_processed.to_sql("yield_swing_data", conn, index=False, if_exists="replace")
+                conn.close()
+                st.success(f"🎉 총 {len(df_processed)}주차 데이터 자동 연산 및 DB 저장 완료!")
+                
+                st.markdown("---")
+                st.subheader("📊 **핵심 연산 지표 요약 뷰**")
+                key_derived_cols = ["zone_id", "week_no", "dli_daily", "t_mean", "cum_p_n_8w", "lagged_dli_7w", "w_avg", "tr_ratio", "y_actual", "swing_index"]
+                df_summary = df_processed[key_derived_cols].rename(columns=FACTOR_LABELS)
+                st.dataframe(df_summary, height=300)
+        except Exception as e:
+            st.error(f"❌ 파일 처리 중 오류 발생: {e}")
+    else:
+        st.info("💡 안내: 상단의 **파일 찾아보기(Browse files)** 버튼을 클릭하여 CSV 또는 Excel 파일을 업로드해 주세요.")
+
+with tab3:
+    st.subheader("현재 저장된 스마트팜 통합 DB 조회 (연산 결과 반영)")
+    if os.path.exists(DB_NAME):
+        conn = sqlite3.connect(DB_NAME)
+        df_db = pd.read_sql("SELECT * FROM yield_swing_data", conn)
+        conn.close()
+
+        st.success("✅ **[DB 연동 완료]** 4.8.1절 자동 연산 결과가 반영되어 있습니다.")
+        max_week = int(df_db["week_no"].max()) if not df_db.empty else 0
+        st.write(f"📊 총 저장된 데이터 행 수: {len(df_db)}행 (수집된 데이터 범위: 1 ~ {max_week}주차)")
+
+        df_db_renamed = df_db.rename(columns=FACTOR_LABELS)
+        st.dataframe(df_db_renamed, use_container_width=True, height=450)
+
+        csv = df_db.to_csv(index=False).encode("utf-8")
+        st.download_button(label="📥 현재 DB 데이터를 CSV로 다운로드", data=csv, file_name="smartfarm_yield_swing_updated.csv", mime="text/csv")
+    else:
+        st.info("아직 저장된 데이터가 없습니다.")
+
+with tab4:
+    st.subheader("📈 구역별 변수 시계열 및 9S-9P 기준선 비교 (Tab 4)")
+    st.markdown("실제 수집/연산된 센서 데이터(파란색 점/실선)와 9S-9P 기준선(빨간색 점/실선)을 나란히 시각화합니다.")
+
+    if not os.path.exists(DB_NAME):
+        st.info("아직 저장된 실시간 데이터가 없습니다.")
+    else:
+        conn = sqlite3.connect(DB_NAME)
+        df_chart = pd.read_sql("SELECT * FROM yield_swing_data", conn)
+        conn.close()
+
+        if df_chart.empty:
+            st.info("DB에 시각화할 데이터가 없습니다.")
+        else:
+            df_chart = df_chart.groupby(["zone_id", "week_no"], as_index=False).mean(numeric_only=True)
+
+            df_bench = pd.DataFrame()
+            if os.path.exists(BENCHMARK_CSV):
+                df_bench = pd.read_csv(BENCHMARK_CSV)
+                df_bench.columns = df_bench.columns.str.strip()
+
+            c1, c2 = st.columns(2)
+            with c1:
+                numeric_cols = df_chart.select_dtypes(include=[np.number]).columns.tolist()
+                if "week_no" in numeric_cols:
+                    numeric_cols.remove("week_no")
+                
+                col_options = {col: FACTOR_LABELS.get(col, col) for col in numeric_cols}
+                
+                default_index = 0
+                if "swing_index" in numeric_cols:
+                    default_index = numeric_cols.index("swing_index")
+
+                selected_col_key = st.selectbox(
+                    "비교할 변수 선택", 
+                    options=list(col_options.keys()),
