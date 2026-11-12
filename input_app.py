@@ -10,38 +10,34 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# 절대 경로 설정 (현재 스크립트 위치 기준)
+# 1. 스크립트 위치 및 스트림릿 클라우드 전용 절대 경로 후보 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
-DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
+possible_paths = [
+    os.path.join(BASE_DIR, "cold_start_standards.csv"),
+    "/mount/src/smartfarm-fasd/cold_start_standards.csv",
+    "cold_start_standards.csv",
+    "./cold_start_standards.csv"
+]
 
-# 2. 캐시를 타지 않고 직접 파일을 읽어오는 안전 로직
-# @st.cache_data(show_spinner=False)
-def load_benchmark_data(file_path):
-    if os.path.exists(file_path):
-        return pd.read_csv(file_path)
-    else:
-        # 파일이 없을 경우 현재 폴더의 파일 목록을 반환하여 진단
-        return None
+# 2. 존재하는 첫 번째 경로를 찾아 파일 로드
+BENCHMARK_CSV = None
+for path in possible_paths:
+    if os.path.exists(path):
+        BENCHMARK_CSV = path
+        break
 
-# 데이터 로드 실행
-df_bench = load_benchmark_data(BENCHMARK_CSV)
-
-# # 3. 만약 로드 실패 시 화면에 실시간 진단 정보 표시 (성공 여부 확인용)
-if df_bench is None or df_bench.empty:
-    st.error(f"❌ 경로에서 파일을 읽지 못했습니다: {BENCHMARK_CSV}")
-    st.write("현재 디렉토리 파일 목록:", os.listdir(BASE_DIR))
-    # 대체 경로 시도
-    fallback_path = "cold_start_standards.csv"
-    if os.path.exists(fallback_path):
-        df_bench = pd.read_csv(fallback_path)
-        st.success("✅ Fallback 경로로 파일을 불러왔습니다!")
-    else:
-        df_bench = pd.DataFrame()
+if BENCHMARK_CSV:
+    df_bench = pd.read_csv(BENCHMARK_CSV)
+    # 정상 로드 확인용 (사이드바에 컬럼 수 표시)
+    st.sidebar.success(f"✅ CSV 로드 성공: {len(df_bench)}행 ({os.path.basename(BENCHMARK_CSV)})")
 else:
-    # 정상 로드 성공 시 검증 메시지
-    # st.sidebar.success(f"기준선 파일 로드 완료 ({len(df_bench)}행)")
-    pass  # else 블록이 비어있지 않도록 pass 처리
+    st.error("🚨 지정된 모든 경로에서 cold_start_standards.csv 파일을 찾지 못했습니다.")
+    st.write("현재 탐색한 경로들:", possible_paths)
+    st.write("현재 디렉토리 파일 목록:", os.listdir(BASE_DIR) if os.path.exists(BASE_DIR) else "경로 없음")
+    df_bench = pd.DataFrame()
+
+# DB 경로 설정
+DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
 
 def init_db():
     if not os.path.exists(DB_NAME):
