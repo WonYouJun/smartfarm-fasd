@@ -311,13 +311,13 @@ with tab4:
         # 혹시 모를 컬럼명 공백을 맞추기 위해 컬럼명 일괄 정제
         df_bench.columns = cleaned_bench_columns
         filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
-                    
-                    merged_plot_df = pd.merge(
-                        filtered_actual[["week_no", "zone_id", selected_col_key]],
-                        filtered_bench[["week_no", "zone_id", ref_col]],
-                        on=["week_no", "zone_id"],
-                        how="left"
-                    )
+
+        merged_plot_df = pd.merge(
+            filtered_actual[["week_no", "zone_id", selected_col_key]],
+            filtered_bench[["week_no", "zone_id", ref_col]],
+            on=["week_no", "zone_id"],
+            how="left"
+        )
                     
                     long_data = []
                     color_map = {}
