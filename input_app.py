@@ -10,10 +10,32 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# 현재 실행 중인 작업 디렉토리를 기준으로 절대 경로 설정 (하나만 선택해서 반영)
-BASE_DIR = os.getcwd()
-BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
-DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
+# 1. 스크립트 파일이 실제로 존재하는 폴더 경로 기준 확보
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CWD = os.getcwd()
+
+# 2. 가능한 모든 후보 경로 탐색
+possible_csv_paths = [
+    os.path.join(SCRIPT_DIR, "cold_start_standards.csv"),
+    os.path.join(CWD, "cold_start_standards.csv"),
+    "cold_start_standards.csv"
+]
+
+BENCHMARK_CSV = None
+for path in possible_csv_paths:
+    if os.path.exists(path):
+        BENCHMARK_CSV = path
+        break
+
+# 만약 그래도 못 찾았다면 서버 디렉토리 내 실제 파일 목록을 화면에 출력하여 진단
+if BENCHMARK_CSV is None:
+    st.error(f"🚨 [경로 오류 진단] CSV 파일을 찾지 못했습니다.")
+    st.info(f"- 스크립트 폴더({SCRIPT_DIR}) 파일 목록: {os.listdir(SCRIPT_DIR) if os.path.exists(SCRIPT_DIR) else '경로 없음'}")
+    st.info(f"- 현재 작업 폴더({CWD}) 파일 목록: {os.listdir(CWD)}")
+    BENCHMARK_CSV = "cold_start_standards.csv"  # 기본 fallback
+
+# DB 경로도 동일하게 스크립트 폴더 기준으로 고정
+DB_NAME = os.path.join(SCRIPT_DIR, "smartfarm_yield_swing.db")
 
 def init_db():
     if not os.path.exists(DB_NAME):
