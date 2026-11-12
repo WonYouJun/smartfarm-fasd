@@ -10,10 +10,10 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-DB_NAME = "smartfarm_yield_swing.db"
-# 현재 app.py가 있는 폴더 경로를 기준으로 절대 경로 지정
+# 코드 상단부에 다음과 같이 절대 경로를 명시
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
+DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
 
 def init_db():
     if not os.path.exists(DB_NAME):
