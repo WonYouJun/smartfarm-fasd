@@ -10,9 +10,10 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# 1. 절대 경로 설정 (현재 스크립트 위치 기준)
+# 절대 경로 설정 (현재 스크립트 위치 기준)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BENCHMARK_CSV = os.path.join(BASE_DIR, "cold_start_standards.csv")
+DB_NAME = os.path.join(BASE_DIR, "smartfarm_yield_swing.db")
 
 # 2. 캐시를 타지 않고 직접 파일을 읽어오는 안전 로직
 @st.cache_data(show_spinner=False)
@@ -26,7 +27,7 @@ def load_benchmark_data(file_path):
 # 데이터 로드 실행
 df_bench = load_benchmark_data(BENCHMARK_CSV)
 
-# 3. 만약 로드 실패 시 화면에 실시간 진단 정보 표시 (성공 여부 확인용)
+# # 3. 만약 로드 실패 시 화면에 실시간 진단 정보 표시 (성공 여부 확인용)
 if df_bench is None or df_bench.empty:
     st.error(f"❌ 경로에서 파일을 읽지 못했습니다: {BENCHMARK_CSV}")
     st.write("현재 디렉토리 파일 목록:", os.listdir(BASE_DIR))
@@ -38,11 +39,9 @@ if df_bench is None or df_bench.empty:
     else:
         df_bench = pd.DataFrame()
 else:
-    # 정상 로드 성공 시 검증 메시지 (필요시 주석 처리 가능)
+    # 정상 로드 성공 시 검증 메시지
     # st.sidebar.success(f"기준선 파일 로드 완료 ({len(df_bench)}행)")
-
-# DB 경로도 동일하게 스크립트 폴더 기준으로 고정
-DB_NAME = os.path.join(SCRIPT_DIR, "smartfarm_yield_swing.db")
+    pass  # else 블록이 비어있지 않도록 pass 처리
 
 def init_db():
     if not os.path.exists(DB_NAME):
