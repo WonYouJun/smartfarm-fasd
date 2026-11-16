@@ -1362,6 +1362,8 @@ with tab5:
                                         )
 
                             with res_col2:
+                                top_micro_name = ""
+                                top_micro_r = 0.0
                                 if has_significant_factor:
                                     st.markdown(f'<div class="sf-group-label">[2단계] Micro 원인 추적 ({top_factor_name} vs 원천 센서)</div>', unsafe_allow_html=True)
                                     micro_vars = ["dli_daily", "t_mean", "vpd_mean", "fruit_load", "vwc", "drainage_rate"]
@@ -1372,8 +1374,13 @@ with tab5:
                                             "원천 센서 설명": FACTOR_LABELS.get(m_key, m_key),
                                             f"Correlation (r) with {top_factor}": round(mr_val, 4),
                                             "p-value": round(mp_val, 4),
+                                            "_r": mr_val,
                                         })
-                                    micro_df = pd.DataFrame(micro_records)
+                                    if micro_records:
+                                        best_micro = max(micro_records, key=lambda rec: abs(rec["_r"]))
+                                        top_micro_name = best_micro["원천 센서 설명"]
+                                        top_micro_r = best_micro["_r"]
+                                    micro_df = pd.DataFrame(micro_records)[["원천 센서 설명", f"Correlation (r) with {top_factor}", "p-value"]]
                                     st.dataframe(micro_df, use_container_width=True, hide_index=True)
                                 else:
                                     st.markdown('<div class="sf-group-label">[2단계] Micro 원인 추적 (실행 보류)</div>', unsafe_allow_html=True)
@@ -1395,11 +1402,15 @@ with tab5:
                                         f"""
                                         <div class="sf-insight-card">
                                             <strong>💡 엔지니어링 인사이트 (7주 시차 리드타임 분석)</strong><br/>
-                                            현재 <strong>{selected_week}주차</strong> 당해 센서 기록(일일 광량 <code>{current_dli:.2f}</code>)과 별개로,
-                                            작물의 생리적 발달 시차인 7주 전(<strong>{lag_week}주차</strong>) 원천 데이터를 추적한 결과:
-                                            <strong>{lag_week}주차 일일 광량(<code>dli_daily</code>)은 {l_row['dli_daily']}</strong>,
-                                            <strong>평균온도(<code>t_mean</code>)는 {l_row['t_mean']}</strong>로 나타났습니다.
-                                            이 7주 전({lag_week}주차)의 환경 제어 편차가 현재 <strong>{selected_week}주차</strong> 수확량 스윙의 근본 원인(Root Cause)으로 작용했습니다.
+                                            현재 <strong>{selected_week}주차</strong> 수확량 스윙의 1단계 핵심 병목 인자는
+                                            <strong>[ {top_factor_name} ]</strong> (<code>r = {top_r:.4f}</code>)로 진단되었습니다.<br/>
+                                            이를 2단계 원천 센서 추적(최대 상관 원천 변수: <strong>{top_micro_name}</strong>, <code>r = {top_micro_r:.4f}</code>) 및
+                                            작물의 생리적 발달 시차인 7주 전(<strong>{lag_week}주차</strong>) 데이터로 연결한 결과,
+                                            7주 전 일일 광량(<code>dli_daily</code>)은 <code>{l_row['dli_daily']:.2f}</code>,
+                                            평균온도(<code>t_mean</code>)는 <code>{l_row['t_mean']:.2f}</code>(당해주차 일일 광량 <code>{current_dli:.2f}</code>)로 나타났습니다.<br/>
+                                            즉, <strong>7주 전({lag_week}주차)의 광·온도 환경 제어 편차</strong>가 누적되어
+                                            현재 <strong>{selected_week}주차</strong>의 <strong>{top_factor_name}</strong> 생리적 부하 및 수확량 스윙을 유발한
+                                            <strong>근본 원인(Root Cause)</strong>으로 작용했습니다.
                                         </div>
                                         """,
                                         unsafe_allow_html=True,
