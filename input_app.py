@@ -476,7 +476,7 @@ total_rows = len(df_snapshot)
 active_zones = df_snapshot["zone_id"].nunique() if not df_snapshot.empty else 0
 max_week_val = int(df_snapshot["week_no"].max()) if not df_snapshot.empty else 0
 swing_alerts = (
-    int((df_snapshot["swing_index"].fillna(0).abs() >= 5.0).sum())
+    int((df_snapshot["swing_index"].fillna(0).abs() >= 20.0).sum())
     if not df_snapshot.empty and "swing_index" in df_snapshot.columns
     else 0
 )
@@ -516,7 +516,7 @@ with k3:
     )
 with k4:
     alert_color = "#b91c1c" if swing_alerts > 0 else "#1c674e"
-    alert_desc = "±5% 임계치 초과 감지" if swing_alerts > 0 else "안정 범위 유지 중"
+    alert_desc = "±20% 임계치 초과 감지" if swing_alerts > 0 else "안정 범위 유지 중"
     st.markdown(
         f"""
         <div class="sf-kpi-card">
@@ -1005,11 +1005,11 @@ with tab5:
                 st.warning("⚠️ DB에 저장된 데이터가 없습니다.")
             else:
                 df_analysis["swing_index"] = df_analysis["swing_index"].fillna(0)
-                swing_alert_df = df_analysis[df_analysis["swing_index"].abs() >= 5.0].sort_values(by="week_no")
+                swing_alert_df = df_analysis[df_analysis["swing_index"].abs() >= 20.0].sort_values(by="week_no")
 
                 max_collected_week = int(df_analysis["week_no"].max()) if not df_analysis.empty else 0
                 st.markdown(
-                    f'<div class="sf-group-label">🚨 [스윙 모니터링] 수집 데이터 범위(1 ~ {max_collected_week}주차) 중 주의/위험 스윙(±5% 이상) 발생 리스트</div>',
+                    f'<div class="sf-group-label">🚨 [스윙 모니터링] 수집 데이터 범위(1 ~ {max_collected_week}주차) 중 주의/위험 스윙(±20% 이상) 발생 리스트</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -1020,7 +1020,7 @@ with tab5:
                         height=220
                     )
                 else:
-                    st.info(f"현재 수집된 1 ~ {max_collected_week}주차 데이터 중 임계값(±5%)을 초과하는 스윙 주차가 없습니다.")
+                    st.info(f"현재 수집된 1 ~ {max_collected_week}주차 데이터 중 임계값(±20%)을 초과하는 스윙 주차가 없습니다.")
 
                 st.markdown("---")
                 st.markdown('<div class="sf-group-label">🎯 재배사 진단 타겟 주차 선택 및 2단계 상관분석</div>', unsafe_allow_html=True)
@@ -1063,7 +1063,7 @@ with tab5:
                             )
                         with tc2:
                             sw_val = target_row["swing_index"]
-                            sw_color = "#b91c1c" if abs(sw_val) >= 5.0 else "#1c674e"
+                            sw_color = "#b91c1c" if abs(sw_val) >= 20.0 else "#1c674e"
                             st.markdown(
                                 f"""
                                 <div class="sf-kpi-card" style="background:#f8fbf7;">
