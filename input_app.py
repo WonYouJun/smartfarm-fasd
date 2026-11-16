@@ -407,9 +407,6 @@ def load_db_snapshot():
 
 df_snapshot = load_db_snapshot()
 
-# ==========================================
-# 4. 사이드바 시스템 상태 모니터링
-# ==========================================
 with st.sidebar:
     st.markdown(
         """
@@ -456,9 +453,6 @@ with st.sidebar:
     else:
         st.sidebar.info("💡 DB에 저장된 데이터가 없습니다. Tab 1 또는 Tab 2에서 데이터를 등록해 주세요.")
 
-# ==========================================
-# 5. 메인 히어로 헤더 & 상단 KPI 바
-# ==========================================
 st.markdown(
     """
     <div class="sf-hero">
@@ -536,9 +530,6 @@ with k4:
 
 st.markdown("<div style='height:0.6rem;'></div>", unsafe_allow_html=True)
 
-# ==========================================
-# 6. 메인 5개 탭 구성
-# ==========================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📝 원천 데이터 직접 입력",
     "📂 일괄 파일 업로드 및 연산",
@@ -782,34 +773,99 @@ with tab4:
 
                     has_bench_col = (matched_ref_col is not None) and (not df_bench.empty)
 
-                    if has_bench_col and PLOTLY_AVAILABLE:
-                        filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
-                        merged_plot_df = pd.merge(
-                            filtered_actual[["week_no", "zone_id", selected_col_key]],
-                            filtered_bench[["week_no", "zone_id", matched_ref_col]],
-                            on=["week_no", "zone_id"],
-                            how="left"
+                    if has_bench_col:
+                        # CSV 내부에 구역별로 다른 기준값이 존재하는지 확인
+                        has_zone_diff = False
+                        if "zone_id" in df_bench.columns:
+                            zone_nunique = df_bench.groupby("week_no")[matched_ref_col].nunique()
+                            has_zone_diff = (zone_nunique > 1).any()
+
+                        bench_mode = st.radio(
+                            "9S-9P 기준선 표시 방식",
+                            ["단일 표준 기준선 (모든 구역 공통)", "구역별 CSV 기준선 개별 표시"],
+                            index=0,
+                            horizontal=True,
+                            key="tab4_bench_mode",
                         )
 
+                        if bench_mode == "단일 표준 기준선 (모든 구역 공통)":
+                            if "zone_id" in df_bench.columns and "Zone_A" in df_bench["zone_id"].values:
+                                df_bench_std = (
+                                    df_bench[df_bench["zone_id"] == "Zone_A"][["week_no", matched_ref_col]]
+                                    .groupby("week_no", as_index=False)[matched_ref_col]
+                                    .mean(numeric_only=True)
+                                )
+                            else:
+                                df_bench_std = (
+                                    df_bench.groupby("week_no", as_index=False)[matched_ref_col]
+                                    .mean(numeric_only=True)
+                                )
+                            df_bench_std = df_bench_std.rename(columns={matched_ref_col: "std_ref_val"})
+
+                            if has_zone_diff:
+                                st.caption("ℹ️ 참고: `cold_start_standards.csv` 내 구역별 기준값이 서로 달라, 토마토 공통 표준 환경(Zone_A 기준) 단일 기준선으로 통합하여 비교합니다.")
+
+                    if has_bench_col and PLOTLY_AVAILABLE:
+                        actual_palette = ["#2980b9", "#0ea5e9", "#1c674e", "#6366f1", "#0284c7"]
                         long_data = []
                         color_map = {}
 
-                        for _, row in merged_plot_df.iterrows():
-                            w = row["week_no"]
-                            z = row["zone_id"]
-                            val_actual = row[selected_col_key]
-                            val_ref = row[matched_ref_col]
+                        if bench_mode == "단일 표준 기준선 (모든 구역 공통)":
+                            merged_plot_df = pd.merge(
+                                filtered_actual[["week_no", "zone_id", selected_col_key]],
+                                df_bench_std[["week_no", "std_ref_val"]],
+                                on="week_no",
+                                how="left",
+                            )
 
-                            act_label = f"{z} (실제)"
-                            ref_label = f"{z} (9S-9P 기준)"
+                            for z_idx, z in enumerate(selected_zones):
+                                act_label = f"{z} (실제)"
+                                color_map[act_label] = actual_palette[z_idx % len(actual_palette)]
+                                sub_z = merged_plot_df[merged_plot_df["zone_id"] == z]
+                                for _, row in sub_z.iterrows():
+                                    if pd.notna(row[selected_col_key]):
+                                        long_data.append({
+                                            "주차 (Week)": row["week_no"],
+                                            "구분": act_label,
+                                            "값": row[selected_col_key],
+                                        })
 
-                            if pd.notna(val_actual):
-                                long_data.append({"주차 (Week)": w, "구분": act_label, "값": val_actual})
-                                color_map[act_label] = "#2980b9"
+                            std_label = "9S-9P 표준 기준선"
+                            color_map[std_label] = "#e74c3c"
+                            actual_weeks = filtered_actual["week_no"].unique()
+                            std_rows = df_bench_std[df_bench_std["week_no"].isin(actual_weeks)]
+                            for _, row in std_rows.iterrows():
+                                if pd.notna(row["std_ref_val"]):
+                                    long_data.append({
+                                        "주차 (Week)": row["week_no"],
+                                        "구분": std_label,
+                                        "값": row["std_ref_val"],
+                                    })
+                        else:
+                            filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
+                            merged_plot_df = pd.merge(
+                                filtered_actual[["week_no", "zone_id", selected_col_key]],
+                                filtered_bench[["week_no", "zone_id", matched_ref_col]],
+                                on=["week_no", "zone_id"],
+                                how="left",
+                            )
 
-                            if pd.notna(val_ref):
-                                long_data.append({"주차 (Week)": w, "구분": ref_label, "값": val_ref})
-                                color_map[ref_label] = "#e74c3c"
+                            ref_palette = ["#e74c3c", "#f97316", "#dc2626", "#fb7185", "#be123c"]
+                            for z_idx, z in enumerate(selected_zones):
+                                act_label = f"{z} (실제)"
+                                ref_label = f"{z} (9S-9P 기준)"
+                                color_map[act_label] = actual_palette[z_idx % len(actual_palette)]
+                                color_map[ref_label] = ref_palette[z_idx % len(ref_palette)]
+
+                            for _, row in merged_plot_df.iterrows():
+                                w = row["week_no"]
+                                z = row["zone_id"]
+                                val_actual = row[selected_col_key]
+                                val_ref = row[matched_ref_col]
+                                if pd.notna(val_actual):
+                                    long_data.append({"주차 (Week)": w, "구분": f"{z} (실제)", "값": val_actual})
+                                if pd.notna(val_ref):
+                                    long_data.append({"주차 (Week)": w, "구분": f"{z} (9S-9P 기준)", "값": val_ref})
 
                         df_plot = pd.DataFrame(long_data)
 
@@ -846,41 +902,58 @@ with tab4:
                             fig.update_xaxes(showgrid=True, gridcolor="#eef4ed", zeroline=False)
                             fig.update_yaxes(showgrid=True, gridcolor="#eef4ed", zerolinecolor="#c5dac2")
                             st.plotly_chart(fig, use_container_width=True)
-                            st.success("💡 안내: **파란색 선과 점**은 실제 수집/연산 데이터이며, **빨간색 선과 점**은 9S-9P 관리기준표 표준 기준선입니다.")
+                            st.success("💡 안내: **파란색 계열 선과 점**은 구역별 실제 수집/연산 데이터이며, **빨간색 선과 점**은 토마토 생육 표준 9S-9P 관리기준선입니다.")
 
                             st.markdown("---")
                             st.markdown('<div class="sf-group-label">📋 상세 비교 데이터 테이블</div>', unsafe_allow_html=True)
 
-                            pivot_combined = merged_plot_df.pivot(index="week_no", columns="zone_id")
-                            plot_table_data = pd.DataFrame(index=pivot_combined.index)
-                            for z in selected_zones:
-                                if (selected_col_key, z) in pivot_combined.columns:
-                                    plot_table_data[f"{z} (실제)"] = pivot_combined[(selected_col_key, z)]
-                                if (matched_ref_col, z) in pivot_combined.columns:
-                                    plot_table_data[f"{z} (9S-9P 기준)"] = pivot_combined[(matched_ref_col, z)]
+                            pivot_actual_tbl = filtered_actual.pivot(index="week_no", columns="zone_id", values=selected_col_key)
+                            plot_table_data = pd.DataFrame(index=sorted(filtered_actual["week_no"].unique()))
+
+                            if bench_mode == "단일 표준 기준선 (모든 구역 공통)":
+                                std_series = df_bench_std.set_index("week_no")["std_ref_val"]
+                                plot_table_data["9S-9P 표준 기준선"] = std_series.reindex(plot_table_data.index)
+                                for z in selected_zones:
+                                    if z in pivot_actual_tbl.columns:
+                                        plot_table_data[f"{z} (실제)"] = pivot_actual_tbl[z]
+                            else:
+                                pivot_combined = merged_plot_df.pivot(index="week_no", columns="zone_id")
+                                for z in selected_zones:
+                                    if (selected_col_key, z) in pivot_combined.columns:
+                                        plot_table_data[f"{z} (실제)"] = pivot_combined[(selected_col_key, z)]
+                                    if (matched_ref_col, z) in pivot_combined.columns:
+                                        plot_table_data[f"{z} (9S-9P 기준)"] = pivot_combined[(matched_ref_col, z)]
 
                             st.dataframe(
-                                plot_table_data.reset_index().rename(columns={"week_no": "주차 (Week)"}),
+                                plot_table_data.reset_index().rename(columns={"index": "주차 (Week)", "week_no": "주차 (Week)"}),
                                 use_container_width=True,
                                 height=350
                             )
 
                     elif has_bench_col and not PLOTLY_AVAILABLE:
                         st.warning("⚠️ 현재 환경에 `plotly` 패키지가 설치되어 있지 않아 Streamlit 기본 차트로 기준선과 함께 표시합니다.")
-                        filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
-                        merged_plot_df = pd.merge(
-                            filtered_actual[["week_no", "zone_id", selected_col_key]],
-                            filtered_bench[["week_no", "zone_id", matched_ref_col]],
-                            on=["week_no", "zone_id"],
-                            how="left"
-                        )
-                        pivot_chart = pd.DataFrame(index=sorted(merged_plot_df["week_no"].unique()))
-                        for z in selected_zones:
-                            sub = merged_plot_df[merged_plot_df["zone_id"] == z].set_index("week_no")
-                            if selected_col_key in sub.columns:
-                                pivot_chart[f"{z} (실제)"] = sub[selected_col_key]
-                            if matched_ref_col in sub.columns:
-                                pivot_chart[f"{z} (9S-9P 기준)"] = sub[matched_ref_col]
+                        pivot_actual_tbl = filtered_actual.pivot(index="week_no", columns="zone_id", values=selected_col_key)
+                        pivot_chart = pd.DataFrame(index=sorted(filtered_actual["week_no"].unique()))
+                        if bench_mode == "단일 표준 기준선 (모든 구역 공통)":
+                            std_series = df_bench_std.set_index("week_no")["std_ref_val"]
+                            pivot_chart["9S-9P 표준 기준선"] = std_series.reindex(pivot_chart.index)
+                            for z in selected_zones:
+                                if z in pivot_actual_tbl.columns:
+                                    pivot_chart[f"{z} (실제)"] = pivot_actual_tbl[z]
+                        else:
+                            filtered_bench = df_bench[df_bench["zone_id"].isin(selected_zones)].copy()
+                            merged_plot_df = pd.merge(
+                                filtered_actual[["week_no", "zone_id", selected_col_key]],
+                                filtered_bench[["week_no", "zone_id", matched_ref_col]],
+                                on=["week_no", "zone_id"],
+                                how="left"
+                            )
+                            for z in selected_zones:
+                                sub = merged_plot_df[merged_plot_df["zone_id"] == z].set_index("week_no")
+                                if selected_col_key in sub.columns:
+                                    pivot_chart[f"{z} (실제)"] = sub[selected_col_key]
+                                if matched_ref_col in sub.columns:
+                                    pivot_chart[f"{z} (9S-9P 기준)"] = sub[matched_ref_col]
 
                         st.line_chart(pivot_chart)
                         st.markdown("---")
