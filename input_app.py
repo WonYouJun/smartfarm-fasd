@@ -211,40 +211,59 @@ html, body, [class*="css"], .stApp {
 }
 
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0.45rem;
-    background-color: var(--sf-surface);
-    padding: 0.45rem;
-    border-radius: 14px;
-    border: 1px solid var(--sf-border);
-    box-shadow: 0 2px 10px rgba(20, 63, 51, 0.04);
-    flex-wrap: wrap;
+    gap: 0.5rem !important;
+    background-color: var(--sf-surface) !important;
+    padding: 0.55rem !important;
+    border-radius: 16px !important;
+    border: 1.5px solid #c5dac2 !important;
+    box-shadow: 0 4px 14px rgba(20, 63, 51, 0.08) !important;
+    flex-wrap: wrap !important;
 }
 
+.stTabs button[data-baseweb="tab"],
 .stTabs [data-baseweb="tab"] {
-    height: 42px;
-    border-radius: 10px;
-    padding: 0 1rem;
-    font-weight: 600;
-    font-size: 0.88rem;
-    color: var(--sf-text-muted);
-    background-color: transparent;
-    border: none !important;
-    transition: all 0.15s ease;
+    min-height: 44px !important;
+    height: auto !important;
+    border-radius: 10px !important;
+    padding: 0.5rem 1.05rem !important;
+    font-weight: 700 !important;
+    font-size: 0.9rem !important;
+    color: var(--sf-forest) !important;
+    background-color: #f3f7f2 !important;
+    border: 1.5px solid #c7dcc4 !important;
+    box-shadow: 0 1px 3px rgba(20, 63, 51, 0.06) !important;
+    transition: all 0.15s ease !important;
 }
 
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span {
+    color: inherit !important;
+    font-weight: 700 !important;
+    font-size: 0.9rem !important;
+    margin: 0 !important;
+}
+
+.stTabs button[data-baseweb="tab"]:hover,
 .stTabs [data-baseweb="tab"]:hover {
-    background-color: var(--sf-mint);
-    color: var(--sf-forest);
+    background-color: #dfece0 !important;
+    border-color: var(--sf-emerald) !important;
+    color: var(--sf-forest) !important;
 }
 
+.stTabs button[data-baseweb="tab"][aria-selected="true"],
+.stTabs [data-baseweb="tab"][aria-selected="true"],
 .stTabs [aria-selected="true"] {
-    background-color: var(--sf-forest) !important;
+    background: linear-gradient(135deg, #143f33 0%, #1c674e 100%) !important;
+    border: 1.5px solid #143f33 !important;
     color: #ffffff !important;
-    box-shadow: 0 4px 12px rgba(20, 63, 51, 0.2);
+    box-shadow: 0 4px 12px rgba(20, 63, 51, 0.28) !important;
 }
 
+.stTabs [data-baseweb="tab-border"],
 .stTabs [data-baseweb="tab-highlight"] {
     display: none !important;
+    height: 0 !important;
+    background: transparent !important;
 }
 
 .stButton > button,
