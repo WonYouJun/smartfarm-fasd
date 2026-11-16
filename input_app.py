@@ -400,6 +400,30 @@ FACTOR_LABELS = {
     "st_grade_distribution": "[기준] 상품과 분포율", "st_brix_variance": "[기준] 당도 편차"
 }
 
+DERIVED_COL_KEYS = [
+    "x1_cum_dli_8w", "gdd_8w", "cum_p_n_8w", "lagged_dli_7w",
+    "lagged_temp_7w", "fli", "tr_ratio", "w_avg", "yield_swing_delta",
+    "ma_3week", "swing_index", "grade_distribution", "brix_variance"
+]
+
+def style_derived_columns(df_display: pd.DataFrame, derived_keys=None):
+    """4.8.1절 자동 연산(파생) 컬럼을 파란색으로 강조 표시"""
+    target_keys = derived_keys if derived_keys is not None else DERIVED_COL_KEYS
+    derived_labels = [
+        FACTOR_LABELS.get(k, k)
+        for k in target_keys
+        if FACTOR_LABELS.get(k, k) in df_display.columns
+    ]
+    if not derived_labels:
+        return df_display
+    try:
+        return df_display.style.set_properties(
+            subset=derived_labels,
+            **{"background-color": "#eff6ff", "color": "#1d4ed8"},
+        )
+    except Exception:
+        return df_display
+
 init_db()
 
 def load_db_snapshot():
@@ -740,12 +764,29 @@ with tab2:
 
                     st.markdown("---")
                     st.markdown('<div class="sf-group-label">📊 핵심 연산 지표 요약 뷰</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        """
+                        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; margin-bottom:0.65rem;">
+                            <span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.7rem; border-radius:9999px; font-size:0.75rem; font-weight:700; background:#f8fafc; color:#475569; border:1px solid #cbd5e1;">
+                                ⬜ 원천 입력 데이터
+                            </span>
+                            <span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.7rem; border-radius:9999px; font-size:0.75rem; font-weight:700; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">
+                                🔵 파란색 강조: 4.8.1절 자동 연산 데이터 (순광합성량 8주 적산, 7주 시차 광량, 평균 단과중, T/R율, 스윙 지수)
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                     key_derived_cols = [
                         "zone_id", "week_no", "dli_daily", "t_mean", "cum_p_n_8w",
                         "lagged_dli_7w", "w_avg", "tr_ratio", "y_actual", "swing_index"
                     ]
                     df_summary = df_processed[key_derived_cols].rename(columns=FACTOR_LABELS)
-                    st.dataframe(df_summary, use_container_width=True, height=320)
+                    styled_summary = style_derived_columns(
+                        df_summary,
+                        ["cum_p_n_8w", "lagged_dli_7w", "w_avg", "tr_ratio", "swing_index"],
+                    )
+                    st.dataframe(styled_summary, use_container_width=True, height=320)
             except Exception as e:
                 st.error(f"❌ 파일 처리 중 오류 발생: {e}")
         else:
@@ -770,9 +811,20 @@ with tab3:
 
             max_week = int(df_db["week_no"].max()) if not df_db.empty else 0
             st.success(f"✅ **[DB 연동 완료]** 총 {len(df_db):,}행의 4.8.1절 자동 연산 결과가 반영되어 있습니다. (수집 범위: 1 ~ {max_week}주차)")
+            st.markdown(
+                """
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; margin-bottom:0.6rem;">
+                    <span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.7rem; border-radius:9999px; font-size:0.75rem; font-weight:700; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">
+                        🔵 파란색 강조 열: 4.8.1절 공식 자동 연산(파생) 데이터
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
             df_db_renamed = df_db.rename(columns=FACTOR_LABELS)
-            st.dataframe(df_db_renamed, use_container_width=True, height=450)
+            styled_db = style_derived_columns(df_db_renamed)
+            st.dataframe(styled_db, use_container_width=True, height=450)
 
             st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
             csv = df_db.to_csv(index=False).encode("utf-8")
@@ -854,6 +906,7 @@ with tab4:
                     has_bench_col = (matched_ref_col is not None) and (not df_bench.empty)
 
                     if has_bench_col:
+                        # CSV 내부에 구역별로 다른 기준값이 존재하는지 확인
                         has_zone_diff = False
                         if "zone_id" in df_bench.columns:
                             zone_nunique = df_bench.groupby("week_no")[matched_ref_col].nunique()
