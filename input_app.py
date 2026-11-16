@@ -210,60 +210,108 @@ html, body, [class*="css"], .stApp {
     border-left: 4px solid var(--sf-emerald);
 }
 
+html body .stApp [data-testid="stTabs"] [data-baseweb="tab-list"],
+[data-testid="stTabs"] [data-baseweb="tab-list"],
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0.5rem !important;
-    background-color: var(--sf-surface) !important;
-    padding: 0.55rem !important;
-    border-radius: 16px !important;
-    border: 1.5px solid #c5dac2 !important;
-    box-shadow: 0 4px 14px rgba(20, 63, 51, 0.08) !important;
+    gap: 6px !important;
+    background-color: transparent !important;
+    padding: 6px 0 0 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    border-bottom: 2px solid #c5dac2 !important;
+    box-shadow: none !important;
     flex-wrap: wrap !important;
+    align-items: flex-end !important;
+    margin-bottom: 0 !important;
 }
 
+html body .stApp [data-testid="stTabs"] button[role="tab"],
+html body .stApp [data-testid="stTabs"] button[data-baseweb="tab"],
+[data-testid="stTabs"] button[data-baseweb="tab"],
+[data-testid="stTabs"] [data-baseweb="tab"],
 .stTabs button[data-baseweb="tab"],
 .stTabs [data-baseweb="tab"] {
-    min-height: 44px !important;
+    min-height: 46px !important;
     height: auto !important;
-    border-radius: 10px !important;
-    padding: 0.5rem 1.05rem !important;
-    font-weight: 700 !important;
+    border-radius: 10px 10px 0 0 !important;
+    padding: 0.62rem 1.3rem !important;
+    margin: 0 0 -2px 0 !important;
+    font-weight: 600 !important;
     font-size: 0.9rem !important;
-    color: var(--sf-forest) !important;
-    background-color: #f3f7f2 !important;
-    border: 1.5px solid #c7dcc4 !important;
-    box-shadow: 0 1px 3px rgba(20, 63, 51, 0.06) !important;
+    color: #2f4d41 !important;
+    background-color: #e4ede3 !important;
+    border: 1.5px solid #c5dac2 !important;
+    border-top: 3px solid transparent !important;
+    border-bottom: 2px solid #c5dac2 !important;
+    box-shadow: none !important;
     transition: all 0.15s ease !important;
+    position: relative !important;
 }
 
+html body .stApp [data-testid="stTabs"] button[role="tab"] p,
+html body .stApp [data-testid="stTabs"] button[role="tab"] div,
+[data-testid="stTabs"] [data-baseweb="tab"] p,
+[data-testid="stTabs"] [data-baseweb="tab"] span,
 .stTabs [data-baseweb="tab"] p,
 .stTabs [data-baseweb="tab"] span {
     color: inherit !important;
-    font-weight: 700 !important;
+    font-weight: inherit !important;
     font-size: 0.9rem !important;
     margin: 0 !important;
 }
 
+html body .stApp [data-testid="stTabs"] button[role="tab"]:hover,
+[data-testid="stTabs"] button[data-baseweb="tab"]:hover,
+[data-testid="stTabs"] [data-baseweb="tab"]:hover,
 .stTabs button[data-baseweb="tab"]:hover,
 .stTabs [data-baseweb="tab"]:hover {
-    background-color: #dfece0 !important;
-    border-color: var(--sf-emerald) !important;
-    color: var(--sf-forest) !important;
+    background-color: #d6e6d5 !important;
+    color: #143f33 !important;
 }
 
+html body .stApp [data-testid="stTabs"] button[role="tab"][aria-selected="true"],
+html body .stApp [data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"],
+[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"],
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"],
+[data-testid="stTabs"] [aria-selected="true"],
 .stTabs button[data-baseweb="tab"][aria-selected="true"],
 .stTabs [data-baseweb="tab"][aria-selected="true"],
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, #143f33 0%, #1c674e 100%) !important;
-    border: 1.5px solid #143f33 !important;
-    color: #ffffff !important;
-    box-shadow: 0 4px 12px rgba(20, 63, 51, 0.28) !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    border: 1.5px solid #c5dac2 !important;
+    border-top: 4px solid #1c674e !important;
+    border-bottom: 2px solid #ffffff !important;
+    color: #143f33 !important;
+    font-weight: 800 !important;
+    padding-top: 0.72rem !important;
+    padding-bottom: 0.68rem !important;
+    box-shadow: 0 -3px 10px rgba(20, 63, 51, 0.08) !important;
+    z-index: 5 !important;
 }
 
+html body .stApp [data-testid="stTabs"] [data-baseweb="tab-border"],
+html body .stApp [data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stTabs"] [data-baseweb="tab-border"],
+[data-testid="stTabs"] [data-baseweb="tab-highlight"],
 .stTabs [data-baseweb="tab-border"],
 .stTabs [data-baseweb="tab-highlight"] {
     display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
     height: 0 !important;
     background: transparent !important;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab-panel"] {
+    padding-top: 0 !important;
+    margin-top: -1px !important;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab-panel"] > div > [data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stTabs"] [data-baseweb="tab-panel"] > div > [data-testid="stForm"] {
+    border-top-left-radius: 0 !important;
+    border-color: #c5dac2 !important;
 }
 
 .stButton > button,
@@ -657,8 +705,8 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📝 원천 데이터 직접 입력",
     "📂 일괄 파일 업로드 및 연산",
     "📊 DB 데이터 조회",
-    "📈 구역별 시계열 및 9S-9P 비교 (Tab 4)",
-    "🔍 2단계 계층적 스윙 진단 (Tab 5)"
+    "📈 구역별 시계열 및 9S-9P 비교",
+    "🔍 2단계 계층적 스윙 진단"
 ])
 
 with tab1:
@@ -861,7 +909,7 @@ with tab4:
         st.markdown(
             """
             <div class="sf-section-header">
-                <h3 class="sf-section-title">📈 구역별 변수 시계열 및 9S-9P 기준선 비교 (Tab 4)</h3>
+                <h3 class="sf-section-title">📈 구역별 변수 시계열 및 9S-9P 기준선 비교</h3>
                 <span class="sf-pill sf-pill-mint">실제값(파란색) vs 9S-9P 기준선(빨간색)</span>
             </div>
             """,
@@ -1135,7 +1183,7 @@ with tab5:
         st.markdown(
             """
             <div class="sf-section-header">
-                <h3 class="sf-section-title">🔍 FAS-D 2단계 계층적 스윙 진단 시스템 (Tab 5)</h3>
+                <h3 class="sf-section-title">🔍 FAS-D 2단계 계층적 스윙 진단 시스템</h3>
                 <span class="sf-pill sf-pill-mint">Macro-Micro Pearson Diagnostic</span>
             </div>
             <p style="font-size:0.9rem; color:#4b695d; margin-bottom:1rem;">
