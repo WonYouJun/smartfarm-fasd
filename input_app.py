@@ -1,8 +1,15 @@
+import math
 import os
 import sqlite3
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+try:
+    from scipy import stats as scipy_stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
 
 try:
     import plotly.express as px
@@ -407,6 +414,79 @@ def load_db_snapshot():
 
 df_snapshot = load_db_snapshot()
 
+def _betacf(a: float, b: float, x: float) -> float:
+    maxit, eps, fpmin = 200, 3.0e-12, 1.0e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < fpmin:
+        d = fpmin
+    d = 1.0 / d
+    h = d
+    for m in range(1, maxit + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < fpmin:
+            d = fpmin
+        c = 1.0 + aa / c
+        if abs(c) < fpmin:
+            c = fpmin
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < fpmin:
+            d = fpmin
+        c = 1.0 + aa / c
+        if abs(c) < fpmin:
+            c = fpmin
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < eps:
+            break
+    return h
+
+def _betainc(a: float, b: float, x: float) -> float:
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    bt = math.exp(
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+        + a * math.log(x) + b * math.log(1.0 - x)
+    )
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+def calc_pearson_stats(series_x: pd.Series, series_y: pd.Series):
+    """유효 쌍 기준 Pearson 상관계수(r), 양측 검정 p-value, 유효 표본 수(n) 계산"""
+    pair_df = pd.DataFrame({"x": pd.to_numeric(series_x, errors="coerce"), "y": pd.to_numeric(series_y, errors="coerce")}).dropna()
+    n = len(pair_df)
+    if n < 3:
+        return 0.0, 1.0, n
+    x_vals = pair_df["x"].to_numpy(dtype=float)
+    y_vals = pair_df["y"].to_numpy(dtype=float)
+    if np.std(x_vals) == 0.0 or np.std(y_vals) == 0.0:
+        return 0.0, 1.0, n
+    if SCIPY_AVAILABLE:
+        r_val, p_val = scipy_stats.pearsonr(x_vals, y_vals)
+        if np.isnan(r_val) or np.isnan(p_val):
+            return 0.0, 1.0, n
+        return float(r_val), float(p_val), n
+    r_val = float(np.corrcoef(x_vals, y_vals)[0, 1])
+    if np.isnan(r_val):
+        return 0.0, 1.0, n
+    r_val = max(-1.0, min(1.0, r_val))
+    if abs(r_val) >= 1.0 - 1e-15:
+        return r_val, 0.0, n
+    df_deg = n - 2
+    t_sq = (r_val * r_val * df_deg) / (1.0 - r_val * r_val)
+    p_val = _betainc(df_deg / 2.0, 0.5, df_deg / (df_deg + t_sq))
+    return float(r_val), float(p_val), n
+
 with st.sidebar:
     st.markdown(
         """
@@ -774,7 +854,6 @@ with tab4:
                     has_bench_col = (matched_ref_col is not None) and (not df_bench.empty)
 
                     if has_bench_col:
-                        # CSV 내부에 구역별로 다른 기준값이 존재하는지 확인
                         has_zone_diff = False
                         if "zone_id" in df_bench.columns:
                             zone_nunique = df_bench.groupby("week_no")[matched_ref_col].nunique()
@@ -1084,65 +1163,126 @@ with tab5:
                                 unsafe_allow_html=True,
                             )
 
-                        st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
+                        th_col1, th_col2 = st.columns(2, gap="medium")
+                        with th_col1:
+                            r_threshold = st.slider(
+                                "통계적 유의미성 최소 상관계수 기준 (|r| Threshold)",
+                                min_value=0.20,
+                                max_value=0.80,
+                                value=0.40,
+                                step=0.05,
+                                key="tab5_r_threshold",
+                            )
+                        with th_col2:
+                            p_threshold = st.selectbox(
+                                "유의수준 임계값 (p-value < α)",
+                                options=[0.05, 0.01, 0.10],
+                                index=0,
+                                key="tab5_p_threshold",
+                            )
+
                         if st.button("🔬 2단계 계층적 상관분석(Macro-Micro) 실행", key="tab5_analysis_button", use_container_width=True):
                             zone_df = df_analysis[df_analysis["zone_id"] == selected_zone].sort_values("week_no")
 
                             st.markdown("---")
+                            macro_vars = ["x1_cum_dli_8w", "gdd_8w", "fli", "cum_p_n_8w", "tr_ratio", "w_avg"]
+                            macro_records = []
+                            for var_key in macro_vars:
+                                r_val, p_val, n_valid = calc_pearson_stats(zone_df[var_key], zone_df["swing_index"])
+                                is_sig = (abs(r_val) >= r_threshold) and (p_val < p_threshold) and (n_valid >= 4)
+                                macro_records.append({
+                                    "var_key": var_key,
+                                    "핵심 인자 설명": FACTOR_LABELS.get(var_key, var_key),
+                                    "Pearson (r)": round(r_val, 4),
+                                    "|r|": round(abs(r_val), 4),
+                                    "p-value": round(p_val, 4),
+                                    "n": n_valid,
+                                    "유의성 검증": "✅ 유의미" if is_sig else "⚪ 기준 미달",
+                                    "is_sig": is_sig,
+                                    "_r": r_val,
+                                    "_p": p_val,
+                                })
+
+                            macro_result_df = pd.DataFrame(macro_records)
+                            sig_candidates = [rec for rec in macro_records if rec["is_sig"]]
+                            has_significant_factor = len(sig_candidates) > 0
+
                             res_col1, res_col2 = st.columns(2, gap="large")
 
                             with res_col1:
-                                st.markdown('<div class="sf-group-label">[1단계] Macro 상관분석 (핵심 생리 인자 vs 스윙 지수)</div>', unsafe_allow_html=True)
-                                macro_vars = ["x1_cum_dli_8w", "gdd_8w", "fli", "cum_p_n_8w", "tr_ratio", "w_avg", "swing_index"]
-                                corr_matrix = zone_df[macro_vars].corr()
-                                macro_corr = corr_matrix[["swing_index"]].drop("swing_index").fillna(0)
-                                macro_corr.columns = ["corr"]
-
-                                if not macro_corr.empty:
-                                    top_factor = macro_corr["corr"].abs().idxmax()
-                                    top_r = macro_corr.loc[top_factor, "corr"]
-                                else:
-                                    top_factor = "cum_p_n_8w"
-                                    top_r = 0.0
-
-                                macro_corr["핵심 인자 설명"] = [FACTOR_LABELS.get(idx, idx) for idx in macro_corr.index]
-                                macro_corr = macro_corr.rename(columns={"corr": "Pearson Correlation (r) with Swing Index"})
-                                macro_corr = macro_corr[["핵심 인자 설명", "Pearson Correlation (r) with Swing Index"]]
-
-                                st.dataframe(macro_corr, use_container_width=True)
-                                top_factor_name = FACTOR_LABELS.get(top_factor, top_factor)
-                                st.success(f"⚡ **1단계 진단 결과**: {selected_week}주차 스윙에 가장 큰 영향을 미친 핵심 인자는 **'{top_factor_name}'**이며, 상관계수 `r = {top_r:.4f}`입니다.")
-
-                            with res_col2:
-                                st.markdown(f'<div class="sf-group-label">[2단계] Micro 원인 추적 ({top_factor_name} vs 원천 센서)</div>', unsafe_allow_html=True)
-                                micro_vars = ["dli_daily", "t_mean", "vpd_mean", "fruit_load", "vwc", "drainage_rate"]
-                                micro_corr = zone_df[micro_vars + [top_factor]].corr()[[top_factor]].drop(top_factor).fillna(0)
-                                micro_corr.columns = ["corr"]
-
-                                micro_corr["원천 센서 설명"] = [FACTOR_LABELS.get(idx, idx) for idx in micro_corr.index]
-                                micro_corr = micro_corr.rename(columns={"corr": f"Correlation (r) with {top_factor}"})
-                                micro_corr = micro_corr[["원천 센서 설명", f"Correlation (r) with {top_factor}"]]
-
-                                st.dataframe(micro_corr, use_container_width=True)
-
-                            st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
-                            lag_week = max(1, selected_week - 7)
-                            lag_row = zone_df[zone_df["week_no"] == lag_week]
-
-                            if len(lag_row) > 0:
-                                l_row = lag_row.iloc[0]
                                 st.markdown(
-                                    f"""
-                                    <div class="sf-insight-card">
-                                        <strong>💡 엔지니어링 인사이트 (7주 시차 리드타임 분석)</strong><br/>
-                                        현재 <strong>{selected_week}주차</strong> 당해 센서 기록(일일 광량 <code>{current_dli:.2f}</code>)과 별개로,
-                                        작물의 생리적 발달 시차인 7주 전(<strong>{lag_week}주차</strong>) 원천 데이터를 추적한 결과:
-                                        <strong>{lag_week}주차 일일 광량(<code>dli_daily</code>)은 {l_row['dli_daily']}</strong>,
-                                        <strong>평균온도(<code>t_mean</code>)는 {l_row['t_mean']}</strong>로 나타났습니다.
-                                        이 7주 전({lag_week}주차)의 환경 제어 편차가 현재 <strong>{selected_week}주차</strong> 수확량 스윙의 근본 원인(Root Cause)으로 작용했습니다.
-                                    </div>
-                                    """,
+                                    f'<div class="sf-group-label">[1단계] Macro 상관분석 (검증 기준: |r| ≥ {r_threshold:.2f} & p &lt; {p_threshold:.2f})</div>',
                                     unsafe_allow_html=True,
                                 )
-                            else:
-                                st.info("7주 전 과거 데이터 구간이 충분하지 않습니다.")
+                                display_macro_df = macro_result_df[["핵심 인자 설명", "Pearson (r)", "|r|", "p-value", "유의성 검증"]]
+                                st.dataframe(display_macro_df, use_container_width=True, hide_index=True)
+
+                                if has_significant_factor:
+                                    best_rec = max(sig_candidates, key=lambda rec: abs(rec["_r"]))
+                                    top_factor = best_rec["var_key"]
+                                    top_r = best_rec["_r"]
+                                    top_p = best_rec["_p"]
+                                    top_factor_name = best_rec["핵심 인자 설명"]
+                                    st.success(
+                                        f"⚡ **1단계 진단 결과**: {selected_week}주차 스윙에 통계적으로 유의미한 영향을 미친 핵심 인자는 "
+                                        f"**'{top_factor_name}'**이며, 상관계수 `r = {top_r:.4f}` (`|r| = {abs(top_r):.4f}`, `p = {top_p:.4f}`)입니다."
+                                    )
+                                else:
+                                    max_obs = max(macro_records, key=lambda rec: abs(rec["_r"])) if macro_records else None
+                                    st.warning(
+                                        "⚠️ 현재 선택된 주차의 스윙은 특정 단일 인자의 지배적 영향이 아닌 복합 노이즈 또는 기상 변동에 기인하며, "
+                                        "통계적으로 유의미한 주범 인자가 도출되지 않았습니다."
+                                    )
+                                    if max_obs is not None:
+                                        st.caption(
+                                            f"참고 — 최대 관측 상관계수 인자 '{max_obs['핵심 인자 설명']}': "
+                                            f"r = {max_obs['_r']:.4f} (|r| = {abs(max_obs['_r']):.4f}, p = {max_obs['_p']:.4f}) → "
+                                            f"임계 기준(|r| ≥ {r_threshold:.2f}, p < {p_threshold:.2f}) 미충족"
+                                        )
+
+                            with res_col2:
+                                if has_significant_factor:
+                                    st.markdown(f'<div class="sf-group-label">[2단계] Micro 원인 추적 ({top_factor_name} vs 원천 센서)</div>', unsafe_allow_html=True)
+                                    micro_vars = ["dli_daily", "t_mean", "vpd_mean", "fruit_load", "vwc", "drainage_rate"]
+                                    micro_records = []
+                                    for m_key in micro_vars:
+                                        mr_val, mp_val, _ = calc_pearson_stats(zone_df[m_key], zone_df[top_factor])
+                                        micro_records.append({
+                                            "원천 센서 설명": FACTOR_LABELS.get(m_key, m_key),
+                                            f"Correlation (r) with {top_factor}": round(mr_val, 4),
+                                            "p-value": round(mp_val, 4),
+                                        })
+                                    micro_df = pd.DataFrame(micro_records)
+                                    st.dataframe(micro_df, use_container_width=True, hide_index=True)
+                                else:
+                                    st.markdown('<div class="sf-group-label">[2단계] Micro 원인 추적 (실행 보류)</div>', unsafe_allow_html=True)
+                                    st.info(
+                                        "🛡️ **Guardrail 작동 (오진단 방지)**\n\n"
+                                        "1단계 Macro 상관분석에서 통계적 유의미성 기준"
+                                        f"(`|r| ≥ {r_threshold:.2f}` 및 `p < {p_threshold:.2f}`)을 충족하는 지배적 인자가 없어, "
+                                        "노이즈 기반의 2단계 Micro 추적 및 7주 시차 리드타임 인사이트 생성을 중단했습니다."
+                                    )
+
+                            if has_significant_factor:
+                                st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
+                                lag_week = max(1, selected_week - 7)
+                                lag_row = zone_df[zone_df["week_no"] == lag_week]
+
+                                if len(lag_row) > 0:
+                                    l_row = lag_row.iloc[0]
+                                    st.markdown(
+                                        f"""
+                                        <div class="sf-insight-card">
+                                            <strong>💡 엔지니어링 인사이트 (7주 시차 리드타임 분석)</strong><br/>
+                                            현재 <strong>{selected_week}주차</strong> 당해 센서 기록(일일 광량 <code>{current_dli:.2f}</code>)과 별개로,
+                                            작물의 생리적 발달 시차인 7주 전(<strong>{lag_week}주차</strong>) 원천 데이터를 추적한 결과:
+                                            <strong>{lag_week}주차 일일 광량(<code>dli_daily</code>)은 {l_row['dli_daily']}</strong>,
+                                            <strong>평균온도(<code>t_mean</code>)는 {l_row['t_mean']}</strong>로 나타났습니다.
+                                            이 7주 전({lag_week}주차)의 환경 제어 편차가 현재 <strong>{selected_week}주차</strong> 수확량 스윙의 근본 원인(Root Cause)으로 작용했습니다.
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True,
+                                    )
+                                else:
+                                    st.info("7주 전 과거 데이터 구간이 충분하지 않습니다.")
