@@ -19,7 +19,12 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 try:
-    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.ensemble import (
+        ExtraTreesRegressor,
+        HistGradientBoostingRegressor,
+        RandomForestRegressor,
+    )
+    from sklearn.inspection import permutation_importance
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -1431,12 +1436,12 @@ with tab6:
         st.markdown(
             """
             <div class="sf-section-header">
-                <h3 class="sf-section-title">🔮 ML 수확량 & 단기 스윙 예측 (Tab 6)</h3>
-                <span class="sf-pill sf-pill-mint">RandomForest MVP · 1~52주 시뮬레이션</span>
+                <h3 class="sf-section-title">🔮 ML 수확량 & 단기 스윙 예측 (2차 고도화 · Lag + Multi-Model)</h3>
+                <span class="sf-pill sf-pill-mint">9-Feature Lag Rollout · 엔탈피 공조 권고</span>
             </div>
             <p style="font-size:0.9rem; color:#4b695d; margin-bottom:1rem;">
-                선택한 기준 주차까지의 실제 수집 데이터만 학습에 활용하여 <strong>향후 3주 단기 스윙 조기 경보</strong>와
-                <strong>52주차까지의 잔여 시즌 누적 수확량 전망</strong>을 예측합니다.
+                작물의 <strong>7주 시차 광·온도(Lag)</strong>를 포함한 9개 피처와 <strong>최대 3개 ML 모델</strong>을 동시 비교하여
+                <strong>단기 스윙 조기 경보</strong>, <strong>엔탈피 공조 조향 권고</strong>, <strong>52주 누적 수확량 전망</strong>을 제공합니다.
             </p>
             """,
             unsafe_allow_html=True,
@@ -1482,10 +1487,39 @@ with tab6:
                         base_week = 1
                         st.selectbox("기준 현재 주차 선택", [1], key="tab6_base_week_empty")
 
+                model_catalog = {
+                    "RandomForestRegressor": {
+                        "label": "RandomForestRegressor (1차 기준선 모델)",
+                        "color": "#f97316",
+                        "dash": "dash",
+                    },
+                    "HistGradientBoostingRegressor": {
+                        "label": "HistGradientBoostingRegressor (히스토그램 부스팅)",
+                        "color": "#16a34a",
+                        "dash": "dot",
+                    },
+                    "ExtraTreesRegressor": {
+                        "label": "ExtraTreesRegressor (엑스트라 트리 앙상블)",
+                        "color": "#9333ea",
+                        "dash": "dashdot",
+                    },
+                }
+
+                selected_models = st.multiselect(
+                    "비교할 ML 모델 선택 (1~3개 선택 · 첫 번째 모델이 대표 모델로 적용)",
+                    options=list(model_catalog.keys()),
+                    default=["RandomForestRegressor", "HistGradientBoostingRegressor", "ExtraTreesRegressor"],
+                    max_selections=3,
+                    format_func=lambda m: model_catalog[m]["label"],
+                    key="tab6_model_multiselect",
+                )
+
                 train_df = zone_full_df[zone_full_df["week_no"] <= base_week].sort_values("week_no").copy()
 
                 if len(train_df) < 8:
                     st.warning("머신러닝 학습을 위해 최소 8주 이상의 수집 데이터가 필요합니다.")
+                elif not selected_models:
+                    st.info("💡 비교할 머신러닝 모델을 최소 1개 이상 선택해 주세요.")
                 else:
                     feature_cols = [
                         "ma_3week",
@@ -1495,11 +1529,27 @@ with tab6:
                         "fruit_load",
                         "cum_p_n_8w",
                         "tr_ratio",
+                        "lagged_dli_7w",
+                        "lagged_temp_7w",
                     ]
                     train_ml = train_df.copy()
                     train_ml["ma_3week"] = pd.to_numeric(train_ml["ma_3week"], errors="coerce").fillna(
                         pd.to_numeric(train_ml["y_actual"], errors="coerce")
                     )
+                    if "lagged_dli_7w" in train_ml.columns:
+                        train_ml["lagged_dli_7w"] = pd.to_numeric(train_ml["lagged_dli_7w"], errors="coerce").fillna(
+                            pd.to_numeric(train_ml["dli_daily"], errors="coerce")
+                        )
+                    else:
+                        train_ml["lagged_dli_7w"] = pd.to_numeric(train_ml["dli_daily"], errors="coerce")
+
+                    if "lagged_temp_7w" in train_ml.columns:
+                        train_ml["lagged_temp_7w"] = pd.to_numeric(train_ml["lagged_temp_7w"], errors="coerce").fillna(
+                            pd.to_numeric(train_ml["t_mean"], errors="coerce")
+                        )
+                    else:
+                        train_ml["lagged_temp_7w"] = pd.to_numeric(train_ml["t_mean"], errors="coerce")
+
                     for fc in feature_cols + ["y_actual", "y_target"]:
                         train_ml[fc] = pd.to_numeric(train_ml[fc], errors="coerce")
                         if train_ml[fc].isna().all():
@@ -1509,14 +1559,6 @@ with tab6:
 
                     X_train = train_ml[feature_cols].to_numpy(dtype=float)
                     y_train = train_ml["y_actual"].to_numpy(dtype=float)
-
-                    rf_model = RandomForestRegressor(
-                        n_estimators=150,
-                        max_depth=6,
-                        min_samples_leaf=2,
-                        random_state=42,
-                    )
-                    rf_model.fit(X_train, y_train)
 
                     # 기준선(9S-9P) 조회용 맵 구성
                     bench_lookup = {}
@@ -1539,7 +1581,7 @@ with tab6:
                         "fruit_load": float(recent_tail["fruit_load"].mean()),
                     }
 
-                    # 기준 주차에서의 표준 기준선 대비 편차 계산 (점진적 정상화 계수 적용)
+                    # 기준 주차에서의 표준 기준선 대비 편차 계산
                     base_bench = bench_lookup.get(base_week)
                     base_offsets = {}
                     for ek in ["dli_daily", "t_mean", "vpd_mean", "fruit_load"]:
@@ -1548,76 +1590,6 @@ with tab6:
                             base_offsets[ek] = float(train_ml[ek].iloc[-1]) - float(base_bench[st_key])
                         else:
                             base_offsets[ek] = 0.0
-
-                    yield_history = train_ml["y_actual"].tolist()
-                    env_history = [
-                        {
-                            "dli_daily": float(r["dli_daily"]),
-                            "vpd_mean": float(r["vpd_mean"]),
-                            "fruit_load": float(r["fruit_load"]),
-                        }
-                        for _, r in train_ml.iterrows()
-                    ]
-
-                    max_horizon_week = max(52, base_week + 3)
-                    future_rows = []
-
-                    for w_idx in range(base_week + 1, max_horizon_week + 1):
-                        steps_ahead = w_idx - base_week
-                        curr_ma3 = float(np.mean(yield_history[-3:])) if yield_history else float(train_ml["y_actual"].mean())
-                        decay = math.exp(-0.30 * steps_ahead)
-
-                        cycle_week = ((w_idx - 1) % 52) + 1
-                        w_bench = bench_lookup.get(cycle_week)
-                        step_env = {}
-                        for ek in ["dli_daily", "t_mean", "vpd_mean", "fruit_load"]:
-                            st_key = f"st_{ek}"
-                            if w_bench is not None and st_key in w_bench and pd.notna(w_bench[st_key]):
-                                step_env[ek] = float(w_bench[st_key]) + base_offsets[ek] * decay
-                            else:
-                                # 기준선 CSV 미존재 시 최근 4주 평균 + 완만한 계절 진동 보정
-                                phase = ((cycle_week - 1) / 51.0) * 2.0 * math.pi
-                                base_phase = ((base_week - 1) / 51.0) * 2.0 * math.pi
-                                seasonal_delta = math.sin(phase - 0.4) - math.sin(base_phase - 0.4)
-                                amp_map = {"dli_daily": 2.5, "t_mean": 1.4, "vpd_mean": 0.18, "fruit_load": 6.0}
-                                step_env[ek] = recent_means[ek] + amp_map[ek] * seasonal_delta
-
-                        env_history.append({
-                            "dli_daily": step_env["dli_daily"],
-                            "vpd_mean": step_env["vpd_mean"],
-                            "fruit_load": step_env["fruit_load"],
-                        })
-                        recent_8_env = env_history[-8:]
-                        temp_pn_sum = sum((item["dli_daily"] * 0.85) - (item["vpd_mean"] * 1.2) for item in recent_8_env)
-                        step_cum_pn = float(np.clip(temp_pn_sum * 10.0 + 500.0, 300.0, 1200.0))
-                        step_tr = float(3.5 - 0.02 * step_env["fruit_load"] + 0.001 * step_cum_pn)
-
-                        x_step = np.array([[
-                            curr_ma3,
-                            step_env["dli_daily"],
-                            step_env["t_mean"],
-                            step_env["vpd_mean"],
-                            step_env["fruit_load"],
-                            step_cum_pn,
-                            step_tr,
-                        ]], dtype=float)
-
-                        y_pred = max(0.1, float(rf_model.predict(x_step)[0]))
-                        denom = curr_ma3 if curr_ma3 != 0 else 1.0
-                        swing_pred = ((y_pred - curr_ma3) / denom) * 100.0
-
-                        future_rows.append({
-                            "week_no": w_idx,
-                            "ma_3week_ref": curr_ma3,
-                            "y_pred": y_pred,
-                            "swing_index_pred": swing_pred,
-                            "is_alert": abs(swing_pred) > 20.0,
-                        })
-                        yield_history.append(y_pred)
-
-                    future_df = pd.DataFrame(future_rows)
-                    short_term_df = future_df.head(3).copy()
-                    season_future_df = future_df[future_df["week_no"] <= 52].copy()
 
                     # 목표 수확량(y_target) 1~52주 합계 계산
                     target_by_week = {}
@@ -1634,16 +1606,217 @@ with tab6:
                         else:
                             season_target_sum += avg_train_target
 
+                    max_horizon_week = max(52, base_week + 3)
                     cum_actual = float(train_ml["y_actual"].sum())
-                    cum_future = float(season_future_df["y_pred"].sum()) if not season_future_df.empty else 0.0
-                    total_season_pred = cum_actual + cum_future
-                    achievement_rate = (total_season_pred / season_target_sum * 100.0) if season_target_sum > 0 else 0.0
                     remaining_weeks_cnt = max(0, 52 - base_week)
 
+                    # 미래 주차별 공통 환경/생육(7주 시차 포함) 타임라인 사전 생성
+                    base_env_by_week = {}
+                    for _, r_tr in train_ml.iterrows():
+                        base_env_by_week[int(r_tr["week_no"])] = {
+                            "dli_daily": float(r_tr["dli_daily"]),
+                            "t_mean": float(r_tr["t_mean"]),
+                            "vpd_mean": float(r_tr["vpd_mean"]),
+                            "fruit_load": float(r_tr["fruit_load"]),
+                        }
+
+                    first_dli = float(train_ml["dli_daily"].iloc[0])
+                    first_temp = float(train_ml["t_mean"].iloc[0])
+
+                    future_env_steps = []
+                    env_seq = [
+                        {
+                            "dli_daily": float(r["dli_daily"]),
+                            "vpd_mean": float(r["vpd_mean"]),
+                            "fruit_load": float(r["fruit_load"]),
+                        }
+                        for _, r in train_ml.iterrows()
+                    ]
+
+                    for w_idx in range(base_week + 1, max_horizon_week + 1):
+                        steps_ahead = w_idx - base_week
+                        decay = math.exp(-0.30 * steps_ahead)
+                        cycle_week = ((w_idx - 1) % 52) + 1
+                        w_bench = bench_lookup.get(cycle_week)
+                        step_env = {}
+                        for ek in ["dli_daily", "t_mean", "vpd_mean", "fruit_load"]:
+                            st_key = f"st_{ek}"
+                            if w_bench is not None and st_key in w_bench and pd.notna(w_bench[st_key]):
+                                step_env[ek] = float(w_bench[st_key]) + base_offsets[ek] * decay
+                            else:
+                                phase = ((cycle_week - 1) / 51.0) * 2.0 * math.pi
+                                base_phase = ((base_week - 1) / 51.0) * 2.0 * math.pi
+                                seasonal_delta = math.sin(phase - 0.4) - math.sin(base_phase - 0.4)
+                                amp_map = {"dli_daily": 2.5, "t_mean": 1.4, "vpd_mean": 0.18, "fruit_load": 6.0}
+                                step_env[ek] = recent_means[ek] + amp_map[ek] * seasonal_delta
+
+                        base_env_by_week[w_idx] = step_env
+                        env_seq.append({
+                            "dli_daily": step_env["dli_daily"],
+                            "vpd_mean": step_env["vpd_mean"],
+                            "fruit_load": step_env["fruit_load"],
+                        })
+                        recent_8_env = env_seq[-8:]
+                        temp_pn_sum = sum((item["dli_daily"] * 0.85) - (item["vpd_mean"] * 1.2) for item in recent_8_env)
+                        step_cum_pn = float(np.clip(temp_pn_sum * 10.0 + 500.0, 300.0, 1200.0))
+                        step_tr = float(3.5 - 0.02 * step_env["fruit_load"] + 0.001 * step_cum_pn)
+
+                        lag_w = w_idx - 7
+                        if lag_w in base_env_by_week:
+                            step_lag_dli = float(base_env_by_week[lag_w]["dli_daily"])
+                            step_lag_temp = float(base_env_by_week[lag_w]["t_mean"])
+                        else:
+                            step_lag_dli = first_dli
+                            step_lag_temp = first_temp
+
+                        future_env_steps.append({
+                            "week_no": w_idx,
+                            "dli_daily": step_env["dli_daily"],
+                            "t_mean": step_env["t_mean"],
+                            "vpd_mean": step_env["vpd_mean"],
+                            "fruit_load": step_env["fruit_load"],
+                            "cum_p_n_8w": step_cum_pn,
+                            "tr_ratio": step_tr,
+                            "lagged_dli_7w": step_lag_dli,
+                            "lagged_temp_7w": step_lag_temp,
+                        })
+
+                    def build_estimator(name: str):
+                        if name == "RandomForestRegressor":
+                            return RandomForestRegressor(
+                                n_estimators=150,
+                                max_depth=6,
+                                min_samples_leaf=2,
+                                random_state=42,
+                            )
+                        if name == "HistGradientBoostingRegressor":
+                            return HistGradientBoostingRegressor(
+                                max_iter=120,
+                                max_depth=4,
+                                min_samples_leaf=3,
+                                learning_rate=0.08,
+                                random_state=42,
+                            )
+                        return ExtraTreesRegressor(
+                            n_estimators=150,
+                            max_depth=6,
+                            min_samples_leaf=2,
+                            random_state=42,
+                        )
+
+                    def compute_feature_importances(estimator, X_mat, y_vec):
+                        if hasattr(estimator, "feature_importances_"):
+                            raw_imp = np.asarray(estimator.feature_importances_, dtype=float)
+                        else:
+                            try:
+                                perm = permutation_importance(
+                                    estimator,
+                                    X_mat,
+                                    y_vec,
+                                    n_repeats=5,
+                                    random_state=42,
+                                )
+                                raw_imp = np.maximum(0.0, np.asarray(perm.importances_mean, dtype=float))
+                            except Exception:
+                                raw_imp = np.ones(X_mat.shape[1], dtype=float)
+                        total_imp = float(np.sum(raw_imp))
+                        if total_imp <= 0.0:
+                            return np.full(X_mat.shape[1], 1.0 / X_mat.shape[1], dtype=float)
+                        return raw_imp / total_imp
+
+                    model_results = {}
+                    comparison_rows = []
+
+                    for idx_m, m_name in enumerate(selected_models):
+                        est = build_estimator(m_name)
+                        est.fit(X_train, y_train)
+
+                        y_in_pred = est.predict(X_train)
+                        mae_val = float(np.mean(np.abs(y_train - y_in_pred)))
+                        rmse_val = float(np.sqrt(np.mean((y_train - y_in_pred) ** 2)))
+
+                        yield_hist = train_ml["y_actual"].tolist()
+                        m_future_rows = []
+
+                        for f_step in future_env_steps:
+                            curr_ma3 = float(np.mean(yield_hist[-3:])) if yield_hist else float(train_ml["y_actual"].mean())
+                            x_vec = np.array([[
+                                curr_ma3,
+                                f_step["dli_daily"],
+                                f_step["t_mean"],
+                                f_step["vpd_mean"],
+                                f_step["fruit_load"],
+                                f_step["cum_p_n_8w"],
+                                f_step["tr_ratio"],
+                                f_step["lagged_dli_7w"],
+                                f_step["lagged_temp_7w"],
+                            ]], dtype=float)
+
+                            y_pred = max(0.1, float(est.predict(x_vec)[0]))
+                            denom = curr_ma3 if curr_ma3 != 0 else 1.0
+                            swing_pred = ((y_pred - curr_ma3) / denom) * 100.0
+                            abs_sw = abs(swing_pred)
+                            if abs_sw >= 20.0:
+                                sw_level = "위험"
+                            elif abs_sw >= 10.0:
+                                sw_level = "주의"
+                            else:
+                                sw_level = "안정"
+
+                            m_future_rows.append({
+                                "week_no": f_step["week_no"],
+                                "ma_3week_ref": curr_ma3,
+                                "y_pred": y_pred,
+                                "swing_index_pred": swing_pred,
+                                "swing_level": sw_level,
+                                "is_alert": abs_sw >= 10.0,
+                            })
+                            yield_hist.append(y_pred)
+
+                        m_future_df = pd.DataFrame(m_future_rows)
+                        m_short_df = m_future_df.head(3).copy()
+                        m_season_df = m_future_df[m_future_df["week_no"] <= 52].copy()
+
+                        m_cum_future = float(m_season_df["y_pred"].sum()) if not m_season_df.empty else 0.0
+                        m_total_pred = cum_actual + m_cum_future
+                        m_ach_rate = (m_total_pred / season_target_sum * 100.0) if season_target_sum > 0 else 0.0
+                        m_short_avg_swing = float(m_short_df["swing_index_pred"].mean()) if not m_short_df.empty else 0.0
+
+                        imp_arr = compute_feature_importances(est, X_train, y_train)
+
+                        model_results[m_name] = {
+                            "mae": mae_val,
+                            "rmse": rmse_val,
+                            "future_df": m_future_df,
+                            "short_df": m_short_df,
+                            "season_df": m_season_df,
+                            "cum_future": m_cum_future,
+                            "total_pred": m_total_pred,
+                            "achievement_rate": m_ach_rate,
+                            "short_avg_swing": m_short_avg_swing,
+                            "importances": imp_arr,
+                        }
+
+                        comparison_rows.append({
+                            "모델명": f"{m_name} (대표)" if idx_m == 0 else m_name,
+                            "학습 MAE (kg/m²)": round(mae_val, 4),
+                            "학습 RMSE (kg/m²)": round(rmse_val, 4),
+                            "향후 3주 평균 스윙 지수 (%)": round(m_short_avg_swing, 2),
+                            "52주 최종 예상 총 수확량 (kg/m²)": round(m_total_pred, 2),
+                            "목표 달성률 (%)": round(m_ach_rate, 1),
+                        })
+
+                    rep_model_name = selected_models[0]
+                    rep_res = model_results[rep_model_name]
+                    short_term_df = rep_res["short_df"]
+
                     # ---------------------------------------------------------
-                    # 1) 잔여 시즌 누적 수확량 전망 KPI (st.metric)
+                    # 1) 잔여 시즌 누적 수확량 전망 KPI (대표 모델 기준)
                     # ---------------------------------------------------------
-                    st.markdown('<div class="sf-group-label">📦 잔여 시즌 누적 수확량 전망 (1 ~ 52주차)</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="sf-group-label">📦 잔여 시즌 누적 수확량 전망 (1 ~ 52주차 · 대표 모델: {rep_model_name})</div>',
+                        unsafe_allow_html=True,
+                    )
                     m1, m2, m3, m4 = st.columns(4, gap="medium")
                     with m1:
                         st.metric(
@@ -1655,40 +1828,45 @@ with tab6:
                         future_label = f"잔여 시즌 예상 수확량 ({base_week + 1}~52주)" if remaining_weeks_cnt > 0 else "잔여 시즌 예상 수확량 (완료)"
                         st.metric(
                             label=future_label,
-                            value=f"{cum_future:.2f} kg/m²",
+                            value=f"{rep_res['cum_future']:.2f} kg/m²",
                             delta=f"잔여 {remaining_weeks_cnt}주 예측",
                         )
                     with m3:
                         st.metric(
                             label="최종 시즌 예상 총 수확량",
-                            value=f"{total_season_pred:.2f} kg/m²",
-                            delta=f"{total_season_pred - season_target_sum:+.2f} kg/m² (vs 목표 {season_target_sum:.1f})",
+                            value=f"{rep_res['total_pred']:.2f} kg/m²",
+                            delta=f"{rep_res['total_pred'] - season_target_sum:+.2f} kg/m² (vs 목표 {season_target_sum:.1f})",
                         )
                     with m4:
                         st.metric(
                             label="목표 수확량 대비 달성률",
-                            value=f"{achievement_rate:.1f}%",
-                            delta=f"{achievement_rate - 100.0:+.1f}%p",
+                            value=f"{rep_res['achievement_rate']:.1f}%",
+                            delta=f"{rep_res['achievement_rate'] - 100.0:+.1f}%p",
                         )
 
                     st.markdown("<div style='height:0.65rem;'></div>", unsafe_allow_html=True)
 
                     # ---------------------------------------------------------
-                    # 2) 단기 스윙 조기 경보 (향후 3주 배지 요약)
+                    # 2) 단기 스윙 조기 경보 (향후 3주 배지 요약 · 대표 모델 기준)
                     # ---------------------------------------------------------
                     st.markdown(
-                        f'<div class="sf-group-label">🚨 단기 스윙 조기 경보 ({base_week + 1} ~ {base_week + 3}주차 예측)</div>',
+                        f'<div class="sf-group-label">🚨 단기 스윙 조기 경보 ({base_week + 1} ~ {base_week + 3}주차 예측 · 대표 모델: {rep_model_name})</div>',
                         unsafe_allow_html=True,
                     )
                     badge_cols = st.columns(3, gap="medium")
                     for idx_b, (_, s_row) in enumerate(short_term_df.iterrows()):
                         with badge_cols[idx_b]:
-                            is_alrt = bool(s_row["is_alert"])
-                            card_bg = "#fef2f2" if is_alrt else "#f0fdf4"
-                            card_border = "#fecaca" if is_alrt else "#bbf7d0"
-                            badge_bg = "#dc2626" if is_alrt else "#15803d"
-                            badge_txt = "🚨 스윙 주의/위험 경보" if is_alrt else "✅ 정상 조향 유지"
-                            val_color = "#b91c1c" if is_alrt else "#143f33"
+                            sw_lvl = s_row["swing_level"]
+                            if sw_lvl == "위험":
+                                card_bg, card_border, badge_bg = "#fef2f2", "#fecaca", "#dc2626"
+                                badge_txt, val_color = "🚨 스윙 위험 경보", "#b91c1c"
+                            elif sw_lvl == "주의":
+                                card_bg, card_border, badge_bg = "#fffbeb", "#fde68a", "#d97706"
+                                badge_txt, val_color = "⚠️ 스윙 주의 경보", "#b45309"
+                            else:
+                                card_bg, card_border, badge_bg = "#f0fdf4", "#bbf7d0", "#15803d"
+                                badge_txt, val_color = "✅ 정상 조향 유지", "#143f33"
+
                             st.markdown(
                                 f"""
                                 <div style="background:{card_bg}; border:1px solid {card_border}; border-radius:14px; padding:0.95rem 1.1rem;">
@@ -1708,13 +1886,155 @@ with tab6:
                                 unsafe_allow_html=True,
                             )
 
+                    # ---------------------------------------------------------
+                    # 2-1) 단기 스윙 경보 연동 '엔탈피 공조 & 생육 조향 권고 가이드' (테스트 모드)
+                    # ---------------------------------------------------------
+                    st.markdown("<div style='height:0.65rem;'></div>", unsafe_allow_html=True)
+                    max_abs_sw_3w = float(short_term_df["swing_index_pred"].abs().max()) if not short_term_df.empty else 0.0
+                    mean_sw_3w = float(short_term_df["swing_index_pred"].mean()) if not short_term_df.empty else 0.0
+
+                    last_obs = train_ml.iloc[-1]
+                    curr_t = float(last_obs["t_mean"])
+                    curr_vpd = float(last_obs["vpd_mean"])
+                    curr_dli_val = float(last_obs["dli_daily"])
+                    curr_fruit = float(last_obs["fruit_load"])
+                    curr_lag_dli = float(last_obs["lagged_dli_7w"])
+                    curr_lag_t = float(last_obs["lagged_temp_7w"])
+
+                    ref_t = float(base_bench["st_t_mean"]) if (base_bench is not None and "st_t_mean" in base_bench and pd.notna(base_bench["st_t_mean"])) else float(train_ml["t_mean"].mean())
+                    ref_vpd = float(base_bench["st_vpd_mean"]) if (base_bench is not None and "st_vpd_mean" in base_bench and pd.notna(base_bench["st_vpd_mean"])) else float(train_ml["vpd_mean"].mean())
+                    ref_dli = float(base_bench["st_dli_daily"]) if (base_bench is not None and "st_dli_daily" in base_bench and pd.notna(base_bench["st_dli_daily"])) else float(train_ml["dli_daily"].mean())
+                    ref_fruit = float(base_bench["st_fruit_load"]) if (base_bench is not None and "st_fruit_load" in base_bench and pd.notna(base_bench["st_fruit_load"])) else float(train_ml["fruit_load"].mean())
+
+                    delta_t = curr_t - ref_t
+                    delta_vpd = curr_vpd - ref_vpd
+                    delta_dli = curr_dli_val - ref_dli
+                    delta_fruit = curr_fruit - ref_fruit
+
+                    is_danger = max_abs_sw_3w >= 20.0
+                    is_caution = (max_abs_sw_3w >= 10.0) and (not is_danger)
+
+                    if is_danger or is_caution:
+                        guide_items = []
+
+                        # 엔탈피 공조(열·수분 밸런스) 통합 진단
+                        high_temp = (delta_t >= 0.8) or (curr_t >= 22.5)
+                        low_temp = (delta_t <= -0.8) or (curr_t <= 17.5)
+                        high_vpd = (delta_vpd >= 0.15) or (curr_vpd >= 1.55)
+                        low_vpd = (delta_vpd <= -0.15) or (curr_vpd <= 0.85)
+
+                        if high_temp and high_vpd:
+                            guide_items.append(
+                                f"<strong>고온·과건조 엔탈피 불균형 대응</strong>: 현재 평균온도(<code>{curr_t:.1f}°C</code>, 기준 대비 <code>{delta_t:+.1f}°C</code>)와 "
+                                f"증기압차(<code>{curr_vpd:.2f} kPa</code>, 기준 대비 <code>{delta_vpd:+.2f} kPa</code>)가 모두 높습니다. "
+                                "단순 냉방 환기만 가동하면 과건조가 심화되므로 <strong>고압 포그/가습 분무와 차광·냉방 환기를 병행</strong>하여 실내 엔탈피(현열+잠열)를 동시 하강시키고 기공 폐쇄를 방지하세요."
+                            )
+                        elif high_temp and low_vpd:
+                            guide_items.append(
+                                f"<strong>고온·과습(저 VPD) 엔탈피 정체 대응</strong>: 온도(<code>{curr_t:.1f}°C</code>)는 높으나 VPD(<code>{curr_vpd:.2f} kPa</code>, <code>{delta_vpd:+.2f} kPa</code>)가 낮아 증산이 억제되고 있습니다. "
+                                "<strong>제습 공조 가동과 순환팬·천창 환기량 상향</strong>을 결합해 잠열 부하와 수분 정체를 동시에 배출하세요."
+                            )
+                        elif low_temp and low_vpd:
+                            guide_items.append(
+                                f"<strong>저온·과습(VPD 부족) 엔탈피 저하 대응</strong>: 평균온도(<code>{curr_t:.1f}°C</code>, <code>{delta_t:+.1f}°C</code>)와 "
+                                f"VPD(<code>{curr_vpd:.2f} kPa</code>, <code>{delta_vpd:+.2f} kPa</code>)가 동반 하락했습니다. "
+                                "<strong>야간 최저온도 상향 및 최소 환기·제습 보완</strong>으로 이슬점 결로를 예방하고 근권 양수분 흡수력을 회복하세요."
+                            )
+                        elif low_temp and high_vpd:
+                            guide_items.append(
+                                f"<strong>저온·과건조 엔탈피 편차 대응</strong>: 저온(<code>{curr_t:.1f}°C</code>) 구간에서 VPD(<code>{curr_vpd:.2f} kPa</code>)가 높아 난방 건조 스트레스가 우려됩니다. "
+                                "<strong>보온 커튼 조기 밀폐 및 미세 가습</strong>으로 온습도 엔탈피 균형을 완만하게 보정하세요."
+                            )
+                        else:
+                            if high_vpd:
+                                guide_items.append(
+                                    f"<strong>증기압차 과다(고 VPD) 수분 밸런스 조정</strong>: VPD가 <code>{curr_vpd:.2f} kPa</code>(기준 대비 <code>{delta_vpd:+.2f}</code>)로 높아 "
+                                    "가습·차광 보정으로 잎 증산 스트레스를 완화하는 엔탈피 제어를 권장합니다."
+                                )
+                            elif low_vpd:
+                                guide_items.append(
+                                    f"<strong>증기압차 부족(저 VPD) 제습·환기 보완</strong>: VPD가 <code>{curr_vpd:.2f} kPa</code>(기준 대비 <code>{delta_vpd:+.2f}</code>)로 낮아 "
+                                    "야간 가온 환기 및 제습 공조로 적정 증산 흐름을 확보하세요."
+                                )
+                            else:
+                                guide_items.append(
+                                    f"<strong>선행 7주 시차·생육 리듬 연동 엔탈피 미세 조향</strong>: 현재 온습도(<code>{curr_t:.1f}°C</code> / VPD <code>{curr_vpd:.2f} kPa</code>)는 기준 부근이나 "
+                                    f"7주 전 광량(<code>{curr_lag_dli:.1f}</code>)·온도(<code>{curr_lag_t:.1f}°C</code>) 시차 영향으로 향후 스윙 변동이 예측됩니다. "
+                                    "주야간 온도차(RTR)와 습도 편차 진폭을 최소화하는 안정형 엔탈피 공조를 유지하세요."
+                                )
+
+                        # 광량 및 착과 부하 생육 조향 권고
+                        if delta_dli <= -1.5 or delta_fruit >= 3.0:
+                            guide_items.append(
+                                f"<strong>착과 부하 및 광-온 비(RTR) 조절</strong>: 현재 일일 광량(<code>{curr_dli_val:.1f}</code>, 기준 대비 <code>{delta_dli:+.1f}</code>) 대비 "
+                                f"착과 부하(<code>{curr_fruit:.1f}개/m²</code>, 기준 대비 <code>{delta_fruit:+.1f}</code>) 부담이 커지고 있습니다. "
+                                "<strong>적과를 통한 착과 부하 완화 및 24시간 평균온도 소폭 하향</strong>으로 수확량 급락 스윙을 방어하세요."
+                            )
+                        elif delta_dli >= 1.5 or delta_fruit <= -3.0:
+                            guide_items.append(
+                                f"<strong>동화산물 전류 및 착과 밸런스 확보</strong>: 광량 여유(<code>{curr_dli_val:.1f}</code>, <code>{delta_dli:+.1f}</code>) 대비 "
+                                f"착과 부하(<code>{curr_fruit:.1f}개/m²</code>, <code>{delta_fruit:+.1f}</code>)를 적정 수준으로 유도하고 "
+                                "주간 광합성 산물이 과실로 원활히 이동하도록 주야간 온도 교차를 확보하세요."
+                            )
+                        else:
+                            swing_dir_msg = "하락(공급 저하)" if mean_sw_3w < 0 else "상승(숙기 집중)"
+                            guide_items.append(
+                                f"<strong>생육 및 수확 리듬 평준화</strong>: 향후 3주 평균 <code>{mean_sw_3w:+.2f}%</code>({swing_dir_msg}) 방향의 스윙이 예상되므로 "
+                                f"현재 착과수(<code>{curr_fruit:.1f}개/m²</code>)와 8주 순광합성 적산량 추이를 점검해 수확 피크를 분산하세요."
+                            )
+
+                        adv_border = "#dc2626" if is_danger else "#d97706"
+                        adv_bg = "#fff5f5" if is_danger else "#fffbeb"
+                        adv_badge_bg = "#dc2626" if is_danger else "#d97706"
+                        adv_title_badge = (
+                            f"🚨 위험 경보 연동 (최대 |스윙| {max_abs_sw_3w:.1f}% ≥ 20%)"
+                            if is_danger
+                            else f"⚠️ 주의 경보 연동 (최대 |스윙| {max_abs_sw_3w:.1f}% ≥ 10%)"
+                        )
+                        items_html = "".join(f"<li style='margin-bottom:0.4rem;'>{g}</li>" for g in guide_items)
+                        st.markdown(
+                            f"""
+                            <div style="background:{adv_bg}; border:1px solid {adv_border}44; border-left:5px solid {adv_border}; border-radius:12px; padding:1rem 1.2rem; color:#143f33;">
+                                <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem; margin-bottom:0.6rem;">
+                                    <strong style="font-size:0.96rem;">🌡️ 엔탈피 공조 &amp; 생육 조향 권고 가이드</strong>
+                                    <span style="background:{adv_badge_bg}; color:#ffffff; padding:0.2rem 0.65rem; border-radius:9999px; font-size:0.74rem; font-weight:700;">{adv_title_badge}</span>
+                                </div>
+                                <ul style="margin:0 0 0.65rem 1.15rem; padding:0; font-size:0.88rem; line-height:1.58;">
+                                    {items_html}
+                                </ul>
+                                <div style="font-size:0.78rem; color:#4b695d; border-top:1px dashed #cbd5e1; padding-top:0.5rem;">
+                                    ※ 현재 테스트 검증 단계로 자동/수동 공조 설비 직접 제어는 비활성화되어 있으며, 조향 권고 메시지만 제공됩니다.
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"""
+                            <div style="background:#eef6ee; border:1px solid #bfd7bf; border-left:5px solid #1c674e; border-radius:12px; padding:1rem 1.2rem; color:#143f33;">
+                                <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem; margin-bottom:0.45rem;">
+                                    <strong style="font-size:0.96rem;">🌡️ 엔탈피 공조 &amp; 생육 조향 권고 가이드</strong>
+                                    <span style="background:#15803d; color:#ffffff; padding:0.2rem 0.65rem; border-radius:9999px; font-size:0.74rem; font-weight:700;">✅ 안정 범위 (최대 |스윙| {max_abs_sw_3w:.1f}% &lt; 10%)</span>
+                                </div>
+                                <p style="margin:0 0 0.55rem 0; font-size:0.88rem; line-height:1.58;">
+                                    향후 3주 예상 스윙 지수가 모두 ±10% 이내로 예측되어 <strong>현재 엔탈피 공조(온도 <code>{curr_t:.1f}°C</code> · VPD <code>{curr_vpd:.2f} kPa</code>) 및 생육 밸런스가 안정적</strong>입니다. 현재 설정된 자율 조향 운전 모드를 유지하세요.
+                                </p>
+                                <div style="font-size:0.78rem; color:#4b695d; border-top:1px dashed #bfd7bf; padding-top:0.5rem;">
+                                    ※ 현재 테스트 검증 단계로 자동/수동 공조 설비 직접 제어는 비활성화되어 있으며, 조향 권고 메시지만 제공됩니다.
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
                     st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
 
                     # ---------------------------------------------------------
-                    # 3) 1~52주 실제 vs 예측 수확량 시계열 차트 (Plotly)
+                    # 3) 통합 시계열 차트 (실제 파란 실선 + 모델별 예측선 동시 비교)
                     # ---------------------------------------------------------
                     st.markdown(
-                        f'<div class="sf-group-label">📈 [{ml_zone}] 1 ~ 52주차 수확량 실적(파란색 실선) vs ML 예측(주황색 점선)</div>',
+                        f'<div class="sf-group-label">📈 [{ml_zone}] 1 ~ 52주차 수확량 실적(파란 실선) vs 선택 모델별 예측 비교</div>',
                         unsafe_allow_html=True,
                     )
 
@@ -1731,21 +2051,25 @@ with tab6:
                                 marker=dict(size=6, color="#2563eb"),
                             )
                         )
-                        if not season_future_df.empty and not actual_plot_df.empty:
-                            last_act_w = int(actual_plot_df["week_no"].iloc[-1])
-                            last_act_y = float(actual_plot_df["y_actual"].iloc[-1])
-                            pred_x = [last_act_w] + season_future_df["week_no"].tolist()
-                            pred_y = [last_act_y] + season_future_df["y_pred"].tolist()
-                            fig_ml.add_trace(
-                                go.Scatter(
-                                    x=pred_x,
-                                    y=pred_y,
-                                    mode="lines+markers",
-                                    name="예측 수확량 (기준 이후~52주)",
-                                    line=dict(color="#f97316", width=3, dash="dash"),
-                                    marker=dict(size=6, color="#f97316"),
+                        for m_name in selected_models:
+                            m_res = model_results[m_name]
+                            m_season_df = m_res["season_df"]
+                            if not m_season_df.empty and not actual_plot_df.empty:
+                                last_act_w = int(actual_plot_df["week_no"].iloc[-1])
+                                last_act_y = float(actual_plot_df["y_actual"].iloc[-1])
+                                pred_x = [last_act_w] + m_season_df["week_no"].tolist()
+                                pred_y = [last_act_y] + m_season_df["y_pred"].tolist()
+                                style_cfg = model_catalog[m_name]
+                                fig_ml.add_trace(
+                                    go.Scatter(
+                                        x=pred_x,
+                                        y=pred_y,
+                                        mode="lines+markers",
+                                        name=f"{m_name} 예측",
+                                        line=dict(color=style_cfg["color"], width=2.8, dash=style_cfg["dash"]),
+                                        marker=dict(size=5, color=style_cfg["color"]),
+                                    )
                                 )
-                            )
                         fig_ml.add_vline(
                             x=base_week,
                             line_dash="dot",
@@ -1757,36 +2081,48 @@ with tab6:
                             xaxis=dict(title="주차 (Week)", range=[1, 52], dtick=4, showgrid=True, gridcolor="#eef4ed"),
                             yaxis=dict(title="주간 수확량 (kg/m²)", showgrid=True, gridcolor="#eef4ed"),
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            height=420,
+                            height=440,
                             plot_bgcolor="#ffffff",
                             paper_bgcolor="#ffffff",
                             hovermode="x unified",
-                            margin=dict(l=20, r=20, t=35, b=20),
+                            margin=dict(l=20, r=20, t=40, b=20),
                             font=dict(family="Plus Jakarta Sans, Noto Sans KR, sans-serif", color="#143f33"),
                         )
                         st.plotly_chart(fig_ml, use_container_width=True)
                     else:
                         chart_df_fb = pd.DataFrame({"주차": range(1, 53)}).set_index("주차")
-                        chart_df_fb["실제 수확량 (파란 실선)"] = actual_plot_df.set_index("week_no")["y_actual"]
-                        if not season_future_df.empty:
-                            chart_df_fb["예측 수확량 (주황 점선)"] = season_future_df.set_index("week_no")["y_pred"]
+                        chart_df_fb["실제 수확량"] = actual_plot_df.set_index("week_no")["y_actual"]
+                        for m_name in selected_models:
+                            m_season_df = model_results[m_name]["season_df"]
+                            if not m_season_df.empty:
+                                chart_df_fb[f"{m_name} 예측"] = m_season_df.set_index("week_no")["y_pred"]
                         st.line_chart(chart_df_fb)
+
+                    # ---------------------------------------------------------
+                    # 4) 모델별 성과 및 전망 비교 요약 테이블
+                    # ---------------------------------------------------------
+                    st.markdown('<div class="sf-group-label">🏆 모델별 성과(백테스트 MAE·RMSE) 및 52주 시즌 전망 비교</div>', unsafe_allow_html=True)
+                    comp_df = pd.DataFrame(comparison_rows)
+                    st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
                     st.markdown("---")
 
                     # ---------------------------------------------------------
-                    # 4) 하단: 향후 3주 상세 표 & Feature Importance 막대 그래프
+                    # 5) 하단: 대표 모델 향후 3주 상세 표 & 변수 중요도 막대 그래프
                     # ---------------------------------------------------------
                     bot_col1, bot_col2 = st.columns([1.15, 1], gap="large")
                     with bot_col1:
-                        st.markdown('<div class="sf-group-label">📋 향후 3주 단기 스윙 예측 상세 표</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="sf-group-label">📋 향후 3주 단기 스윙 예측 상세 표 (대표 모델: {rep_model_name})</div>',
+                            unsafe_allow_html=True,
+                        )
                         short_disp = short_term_df.copy()
                         short_disp["예측 주차"] = short_disp["week_no"].astype(int).astype(str) + "주차"
                         short_disp["직전 3주 이동평균 (kg/m²)"] = short_disp["ma_3week_ref"].round(3)
                         short_disp["예상 수확량 (kg/m²)"] = short_disp["y_pred"].round(3)
                         short_disp["예상 스윙 지수 (%)"] = short_disp["swing_index_pred"].round(2)
-                        short_disp["조향 상태 판정"] = short_disp["is_alert"].apply(
-                            lambda v: "🚨 스윙 주의/위험 경보" if v else "✅ 정상 조향 유지"
+                        short_disp["조향 상태 판정"] = short_disp["swing_level"].apply(
+                            lambda lv: "🚨 위험 경보 (≥20%)" if lv == "위험" else ("⚠️ 주의 경보 (≥10%)" if lv == "주의" else "✅ 정상 조향 유지")
                         )
                         st.dataframe(
                             short_disp[
@@ -1803,10 +2139,13 @@ with tab6:
                         )
 
                     with bot_col2:
-                        st.markdown('<div class="sf-group-label">📊 RandomForest 주요 변수 중요도 (Feature Importance)</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="sf-group-label">📊 주요 변수 중요도 9개 피처 (대표 모델: {rep_model_name})</div>',
+                            unsafe_allow_html=True,
+                        )
                         imp_df = pd.DataFrame({
                             "주요 변수": [FACTOR_LABELS.get(c, c) for c in feature_cols],
-                            "중요도": rf_model.feature_importances_,
+                            "중요도": rep_res["importances"],
                         }).sort_values("중요도", ascending=True)
 
                         if PLOTLY_AVAILABLE:
@@ -1820,7 +2159,7 @@ with tab6:
                                 color_continuous_scale=["#bbf7d0", "#1c674e"],
                             )
                             fig_imp.update_layout(
-                                height=280,
+                                height=320,
                                 showlegend=False,
                                 coloraxis_showscale=False,
                                 plot_bgcolor="#ffffff",
