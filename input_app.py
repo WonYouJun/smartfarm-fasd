@@ -1436,12 +1436,13 @@ with tab6:
         st.markdown(
             """
             <div class="sf-section-header">
-                <h3 class="sf-section-title">🔮 ML 수확량 & 단기 스윙 예측 (2차 고도화 · Lag + Multi-Model)</h3>
-                <span class="sf-pill sf-pill-mint">9-Feature Lag Rollout · 엔탈피 공조 권고</span>
+                <h3 class="sf-section-title">🔮 ML 수확량 & 단기 스윙 예측 (3차 고도화 · 홀드아웃 검증 + 스케일 보정)</h3>
+                <span class="sf-pill sf-pill-mint">9-Feature Lag Rollout · 홀드아웃 3주 검증 · 엔탈피 공조 권고</span>
             </div>
             <p style="font-size:0.9rem; color:#4b695d; margin-bottom:1rem;">
-                작물의 <strong>7주 시차 광·온도(Lag)</strong>를 포함한 9개 피처와 <strong>최대 3개 ML 모델</strong>을 동시 비교하여
-                <strong>단기 스윙 조기 경보</strong>, <strong>엔탈피 공조 조향 권고</strong>, <strong>52주 누적 수확량 전망</strong>을 제공합니다.
+                작물의 <strong>7주 시차 광·온도(Lag)</strong>를 포함한 9개 피처와 <strong>최대 3개 ML 모델</strong>을 동시 비교하며,
+                <strong>홀드아웃 검증 오차(MAE·RMSE)</strong>, <strong>수확량 스케일 보정 옵션</strong>,
+                <strong>엔탈피 공조 조향 권고</strong>, <strong>52주 누적 수확량 전망</strong>을 제공합니다.
             </p>
             """,
             unsafe_allow_html=True,
@@ -1460,7 +1461,7 @@ with tab6:
                 st.warning("⚠️ DB에 저장된 데이터가 없습니다. 데이터를 먼저 업로드해 주세요.")
             else:
                 ml_zones = sorted(df_ml_all["zone_id"].dropna().unique().tolist())
-                sel_c1, sel_c2 = st.columns(2, gap="medium")
+                sel_c1, sel_c2, sel_c3 = st.columns([1, 1, 1.1], gap="medium")
                 with sel_c1:
                     ml_zone = st.selectbox("예측 대상 구역 선택", ml_zones, key="tab6_zone_select")
                 zone_full_df = (
@@ -1486,6 +1487,29 @@ with tab6:
                     else:
                         base_week = 1
                         st.selectbox("기준 현재 주차 선택", [1], key="tab6_base_week_empty")
+
+                scale_options = {
+                    1.0: "1.0배 (원본 데이터 유지 · 기본값)",
+                    0.4: "0.4배 (연간 52주 누적 기준 보정)",
+                    0.5: "0.5배 (반감 스케일 보정)",
+                    0.25: "0.25배 (저밀도·초기 수확 보정)",
+                    1.5: "1.5배 (고밀도 확장 보정)",
+                }
+                with sel_c3:
+                    yield_scale = float(
+                        st.selectbox(
+                            "수확량 스케일 배율 (연간 누적 정합성 보정)",
+                            options=list(scale_options.keys()),
+                            index=0,
+                            format_func=lambda s: scale_options[s],
+                            key="tab6_yield_scale_select",
+                        )
+                    )
+
+                st.caption(
+                    "ℹ️ 수확량 스케일 정합성 안내: 주간 수확량(`y_actual`, `y_target`)이 52주 연간 누적 기준 대비 크게 입력된 샘플 데이터를 점검할 때 "
+                    "배율(예: `0.4배`)을 선택하면 DB 원본을 변경하지 않고 20주차·52주차 누적 수확량 감각을 즉시 비교할 수 있습니다."
+                )
 
                 model_catalog = {
                     "RandomForestRegressor": {
@@ -1514,7 +1538,12 @@ with tab6:
                     key="tab6_model_multiselect",
                 )
 
-                train_df = zone_full_df[zone_full_df["week_no"] <= base_week].sort_values("week_no").copy()
+                zone_scaled_df = zone_full_df.copy()
+                for sc_col in ["y_actual", "y_target", "ma_3week"]:
+                    if sc_col in zone_scaled_df.columns:
+                        zone_scaled_df[sc_col] = pd.to_numeric(zone_scaled_df[sc_col], errors="coerce") * yield_scale
+
+                train_df = zone_scaled_df[zone_scaled_df["week_no"] <= base_week].sort_values("week_no").copy()
 
                 if len(train_df) < 8:
                     st.warning("머신러닝 학습을 위해 최소 8주 이상의 수집 데이터가 필요합니다.")
@@ -1591,18 +1620,18 @@ with tab6:
                         else:
                             base_offsets[ek] = 0.0
 
-                    # 목표 수확량(y_target) 1~52주 합계 계산
+                    # 목표 수확량(y_target) 1~52주 합계 계산 (스케일 배율 동일 반영)
                     target_by_week = {}
-                    for _, zrow in zone_full_df.iterrows():
+                    for _, zrow in zone_scaled_df.iterrows():
                         if pd.notna(zrow.get("y_target")):
                             target_by_week[int(zrow["week_no"])] = float(zrow["y_target"])
-                    avg_train_target = float(train_ml["y_target"].mean()) if not train_ml.empty else 3.0
+                    avg_train_target = float(train_ml["y_target"].mean()) if not train_ml.empty else 3.0 * yield_scale
                     season_target_sum = 0.0
                     for w_i in range(1, 53):
                         if w_i in target_by_week:
                             season_target_sum += target_by_week[w_i]
                         elif w_i in bench_lookup and "st_y_target" in bench_lookup[w_i] and pd.notna(bench_lookup[w_i]["st_y_target"]):
-                            season_target_sum += float(bench_lookup[w_i]["st_y_target"])
+                            season_target_sum += float(bench_lookup[w_i]["st_y_target"]) * yield_scale
                         else:
                             season_target_sum += avg_train_target
 
@@ -1724,6 +1753,18 @@ with tab6:
                             return np.full(X_mat.shape[1], 1.0 / X_mat.shape[1], dtype=float)
                         return raw_imp / total_imp
 
+                    # 홀드아웃 3주 검증 가능 여부 (base_week >= 12주 및 학습 데이터 >= 12행)
+                    can_holdout_val = (base_week >= 12) and (len(train_ml) >= 12)
+                    if can_holdout_val:
+                        val_fit_ml = train_ml.iloc[:-3].copy()
+                        val_eval_ml = train_ml.iloc[-3:].copy()
+                        X_val_fit = val_fit_ml[feature_cols].to_numpy(dtype=float)
+                        y_val_fit = val_fit_ml["y_actual"].to_numpy(dtype=float)
+                        y_val_true = val_eval_ml["y_actual"].to_numpy(dtype=float)
+                        val_weeks_label = f"{int(val_eval_ml['week_no'].iloc[0])}~{int(val_eval_ml['week_no'].iloc[-1])}주차"
+                    else:
+                        val_weeks_label = "N/A"
+
                     model_results = {}
                     comparison_rows = []
 
@@ -1734,6 +1775,39 @@ with tab6:
                         y_in_pred = est.predict(X_train)
                         mae_val = float(np.mean(np.abs(y_train - y_in_pred)))
                         rmse_val = float(np.sqrt(np.mean((y_train - y_in_pred) ** 2)))
+
+                        # 마지막 3주 홀드아웃 순차 롤아웃 검증 오차 계산
+                        if can_holdout_val:
+                            val_est = build_estimator(m_name)
+                            val_est.fit(X_val_fit, y_val_fit)
+                            val_yield_hist = val_fit_ml["y_actual"].tolist()
+                            val_preds = []
+                            for _, v_row in val_eval_ml.iterrows():
+                                v_ma3 = float(np.mean(val_yield_hist[-3:])) if val_yield_hist else float(val_fit_ml["y_actual"].mean())
+                                x_val_vec = np.array([[
+                                    v_ma3,
+                                    float(v_row["dli_daily"]),
+                                    float(v_row["t_mean"]),
+                                    float(v_row["vpd_mean"]),
+                                    float(v_row["fruit_load"]),
+                                    float(v_row["cum_p_n_8w"]),
+                                    float(v_row["tr_ratio"]),
+                                    float(v_row["lagged_dli_7w"]),
+                                    float(v_row["lagged_temp_7w"]),
+                                ]], dtype=float)
+                                v_pred = max(0.05, float(val_est.predict(x_val_vec)[0]))
+                                val_preds.append(v_pred)
+                                val_yield_hist.append(v_pred)
+                            y_val_pred_arr = np.asarray(val_preds, dtype=float)
+                            val_mae_val = float(np.mean(np.abs(y_val_true - y_val_pred_arr)))
+                            val_rmse_val = float(np.sqrt(np.mean((y_val_true - y_val_pred_arr) ** 2)))
+                            val_mae_disp = round(val_mae_val, 4)
+                            val_rmse_disp = round(val_rmse_val, 4)
+                        else:
+                            val_mae_val = None
+                            val_rmse_val = None
+                            val_mae_disp = "N/A (데이터 부족)"
+                            val_rmse_disp = "N/A (데이터 부족)"
 
                         yield_hist = train_ml["y_actual"].tolist()
                         m_future_rows = []
@@ -1752,7 +1826,7 @@ with tab6:
                                 f_step["lagged_temp_7w"],
                             ]], dtype=float)
 
-                            y_pred = max(0.1, float(est.predict(x_vec)[0]))
+                            y_pred = max(0.05, float(est.predict(x_vec)[0]))
                             denom = curr_ma3 if curr_ma3 != 0 else 1.0
                             swing_pred = ((y_pred - curr_ma3) / denom) * 100.0
                             abs_sw = abs(swing_pred)
@@ -1787,6 +1861,8 @@ with tab6:
                         model_results[m_name] = {
                             "mae": mae_val,
                             "rmse": rmse_val,
+                            "val_mae": val_mae_val,
+                            "val_rmse": val_rmse_val,
                             "future_df": m_future_df,
                             "short_df": m_short_df,
                             "season_df": m_season_df,
@@ -1801,6 +1877,8 @@ with tab6:
                             "모델명": f"{m_name} (대표)" if idx_m == 0 else m_name,
                             "학습 MAE (kg/m²)": round(mae_val, 4),
                             "학습 RMSE (kg/m²)": round(rmse_val, 4),
+                            "검증 MAE (kg/m²)": val_mae_disp,
+                            "검증 RMSE (kg/m²)": val_rmse_disp,
                             "향후 3주 평균 스윙 지수 (%)": round(m_short_avg_swing, 2),
                             "52주 최종 예상 총 수확량 (kg/m²)": round(m_total_pred, 2),
                             "목표 달성률 (%)": round(m_ach_rate, 1),
@@ -1813,8 +1891,9 @@ with tab6:
                     # ---------------------------------------------------------
                     # 1) 잔여 시즌 누적 수확량 전망 KPI (대표 모델 기준)
                     # ---------------------------------------------------------
+                    scale_badge_txt = f" · 스케일 {yield_scale:.2f}배 적용" if yield_scale != 1.0 else ""
                     st.markdown(
-                        f'<div class="sf-group-label">📦 잔여 시즌 누적 수확량 전망 (1 ~ 52주차 · 대표 모델: {rep_model_name})</div>',
+                        f'<div class="sf-group-label">📦 잔여 시즌 누적 수확량 전망 (1 ~ 52주차 · 대표 모델: {rep_model_name}{scale_badge_txt})</div>',
                         unsafe_allow_html=True,
                     )
                     m1, m2, m3, m4 = st.columns(4, gap="medium")
@@ -2099,9 +2178,13 @@ with tab6:
                         st.line_chart(chart_df_fb)
 
                     # ---------------------------------------------------------
-                    # 4) 모델별 성과 및 전망 비교 요약 테이블
+                    # 4) 모델별 성과 및 전망 비교 요약 테이블 (학습 오차 + 홀드아웃 검증 오차)
                     # ---------------------------------------------------------
-                    st.markdown('<div class="sf-group-label">🏆 모델별 성과(백테스트 MAE·RMSE) 및 52주 시즌 전망 비교</div>', unsafe_allow_html=True)
+                    val_caption_suffix = f"마지막 3주({val_weeks_label}) 홀드아웃 검증 포함" if can_holdout_val else "홀드아웃 검증: 12주 미만 데이터 부족"
+                    st.markdown(
+                        f'<div class="sf-group-label">🏆 모델별 성과(학습·홀드아웃 검증 MAE·RMSE) 및 52주 시즌 전망 비교 · {val_caption_suffix}</div>',
+                        unsafe_allow_html=True,
+                    )
                     comp_df = pd.DataFrame(comparison_rows)
                     st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
